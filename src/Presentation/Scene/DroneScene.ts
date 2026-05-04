@@ -161,7 +161,7 @@ export class DroneScene {
       './IROV_AllInOne.glb',
       (gltf) => {
         const model = gltf.scene;
-        model.scale.set(0.08, 0.08, 0.08); // Échelle réaliste pour une chambre
+        model.scale.set(0.008, 0.008, 0.008); // Échelle minuscule (8mm) pour AR
         model.visible = false;
         model.traverse((child) => {
           if (child instanceof THREE.Mesh) {
