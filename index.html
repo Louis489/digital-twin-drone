@@ -13,9 +13,29 @@
         width: 100vw;
         height: 100vh;
       }
+      #back-button {
+        position: absolute;
+        top: 20px;
+        left: 20px;
+        z-index: 1000;
+        display: none;
+        padding: 10px 20px;
+        background-color: rgba(26, 77, 110, 0.9);
+        color: white;
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+        font-family: sans-serif;
+        font-size: 14px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+      }
+      #back-button:hover {
+        background-color: rgba(26, 77, 110, 1);
+      }
     </style>
   </head>
   <body>
+    <button id="back-button">Retour au Globe</button>
     <div id="canvas-container"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>

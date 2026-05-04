@@ -1,17 +1,29 @@
-import { DroneScene } from './Presentation';
+import { DroneScene, GlobeScene } from './Presentation';
 import { Drone } from './Domain/Entities/Drone';
 import { ReplayTelemetryUseCase } from './Application/UseCases/ReplayTelemetryUseCase';
 import { TelemetryService } from './Infrastructure/Services/TelemetryService';
 
 const container = document.getElementById('canvas-container');
+const backButton = document.getElementById('back-button');
 
 if (!container) {
   throw new Error('Canvas container not found');
 }
 
-async function init(): Promise<void> {
-  if (!container) {
-    throw new Error('Canvas container not found');
+let currentScene: GlobeScene | DroneScene | null = null;
+
+function loadDroneScene(): void {
+  if (!container) return;
+
+  if (currentScene) {
+    currentScene.dispose();
+    currentScene = null;
+  }
+
+  container.innerHTML = '';
+
+  if (backButton) {
+    backButton.style.display = 'block';
   }
 
   const drone = new Drone({
@@ -24,22 +36,60 @@ async function init(): Promise<void> {
   });
 
   const scene = new DroneScene(container, drone);
+  currentScene = scene;
 
   const telemetryService = new TelemetryService();
 
-  try {
-    const telemetryData = await telemetryService.loadTelemetryData();
-    console.log(`Loaded ${telemetryData.length} telemetry points`);
+  telemetryService.loadTelemetryData()
+    .then((telemetryData) => {
+      console.log(`Loaded ${telemetryData.length} telemetry points`);
 
-    const replay = new ReplayTelemetryUseCase(drone, telemetryData);
-    replay.setSpeedMultiplier(5);
-    replay.start();
-  } catch (error) {
-    console.error('Failed to load telemetry:', error);
+      const replay = new ReplayTelemetryUseCase(drone, telemetryData);
+      replay.setSpeedMultiplier(5);
+      replay.start();
+    })
+    .catch((error) => {
+      console.error('Failed to load telemetry:', error);
+    });
+}
+
+function setupBackButton(): void {
+  if (!backButton) return;
+
+  backButton.addEventListener('click', () => {
+    backButton.style.display = 'none';
+    loadGlobeScene();
+  });
+}
+
+function loadGlobeScene(): void {
+  if (!container) return;
+
+  if (currentScene) {
+    currentScene.dispose();
+    currentScene = null;
   }
 
+  container.innerHTML = '';
+
+  if (backButton) {
+    backButton.style.display = 'none';
+  }
+
+  const scene = new GlobeScene(container, () => {
+    loadDroneScene();
+  });
+  currentScene = scene;
+}
+
+function init(): void {
+  setupBackButton();
+  loadGlobeScene();
+
   window.addEventListener('beforeunload', () => {
-    scene.dispose();
+    if (currentScene) {
+      currentScene.dispose();
+    }
   });
 }
 

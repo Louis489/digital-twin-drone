@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { ARButton } from 'three/examples/jsm/webxr/ARButton.js';
 import { Drone } from '../../Domain/Entities/Drone';
 
 export class DroneScene {
@@ -8,7 +9,7 @@ export class DroneScene {
   private renderer: THREE.WebGLRenderer;
   private droneModel: THREE.Group | null = null;
   private droneEntity: Drone | null = null;
-  private animationId: number | null = null;
+  private resizeHandler!: () => void;
 
   constructor(container: HTMLElement, droneEntity?: Drone) {
     this.scene = new THREE.Scene();
@@ -24,13 +25,16 @@ export class DroneScene {
     this.camera.position.set(10, 8, 10);
     this.camera.lookAt(0, 0, 0);
 
-    this.renderer = new THREE.WebGLRenderer({ antialias: true });
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     this.renderer.setSize(container.clientWidth, container.clientHeight);
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1;
+    this.renderer.xr.enabled = true;
     container.appendChild(this.renderer.domElement);
+
+    document.body.appendChild(ARButton.createButton(this.renderer));
 
     if (droneEntity) {
       this.droneEntity = droneEntity;
@@ -41,7 +45,7 @@ export class DroneScene {
     this.loadDroneModel();
 
     this.handleResize(container);
-    this.animate();
+    this.renderer.setAnimationLoop(this.animate.bind(this));
   }
 
   private setupLights(): void {
@@ -102,8 +106,10 @@ export class DroneScene {
       './IROV_AllInOne.glb',
       (gltf) => {
         const model = gltf.scene;
-        model.scale.set(0.05, 0.05, 0.05);
-        model.position.y = 0.5;
+        // Échelle AR-friendly (plus grande pour être visible)
+        model.scale.set(0.3, 0.3, 0.3);
+        // Position AR: devant l'utilisateur, légèrement au sol
+        model.position.set(0, -0.5, -2);
         model.traverse((child) => {
           if (child instanceof THREE.Mesh) {
             child.castShadow = true;
@@ -123,8 +129,6 @@ export class DroneScene {
   }
 
   private animate(): void {
-    this.animationId = requestAnimationFrame(() => this.animate());
-
     if (this.droneModel && this.droneEntity) {
       const pos = this.droneEntity.localPosition;
       this.droneModel.position.x = pos.x;
@@ -137,11 +141,12 @@ export class DroneScene {
   }
 
   private handleResize(container: HTMLElement): void {
-    window.addEventListener('resize', () => {
+    this.resizeHandler = (): void => {
       this.camera.aspect = container.clientWidth / container.clientHeight;
       this.camera.updateProjectionMatrix();
       this.renderer.setSize(container.clientWidth, container.clientHeight);
-    });
+    };
+    window.addEventListener('resize', this.resizeHandler);
   }
 
   setDroneEntity(drone: Drone): void {
@@ -149,9 +154,49 @@ export class DroneScene {
   }
 
   dispose(): void {
-    if (this.animationId !== null) {
-      cancelAnimationFrame(this.animationId);
+    this.renderer.setAnimationLoop(null);
+
+    const arButton = document.getElementById('ARButton');
+    if (arButton) {
+      arButton.remove();
     }
+
+    window.removeEventListener('resize', this.resizeHandler);
+
+    if (this.droneModel) {
+      this.droneModel.traverse((child) => {
+        if (child instanceof THREE.Mesh) {
+          child.geometry.dispose();
+          if (Array.isArray(child.material)) {
+            child.material.forEach((m) => m.dispose());
+          } else {
+            child.material.dispose();
+          }
+        }
+      });
+      this.scene.remove(this.droneModel);
+      this.droneModel = null;
+    }
+
+    this.scene.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        child.geometry.dispose();
+        if (Array.isArray(child.material)) {
+          child.material.forEach((m) => m.dispose());
+        } else if (child.material) {
+          child.material.dispose();
+        }
+      }
+      if (child instanceof THREE.Light) {
+        child.dispose();
+      }
+    });
+
+    this.scene.clear();
+
     this.renderer.dispose();
+    if (this.renderer.domElement.parentElement) {
+      this.renderer.domElement.parentElement.removeChild(this.renderer.domElement);
+    }
   }
 }
