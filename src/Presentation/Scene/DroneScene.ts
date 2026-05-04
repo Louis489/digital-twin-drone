@@ -13,12 +13,14 @@ export class DroneScene {
   private resizeHandler!: () => void;
   private reticle: THREE.Mesh | null = null;
   private hitTestSource: XRHitTestSource | null = null;
-  private referenceSpace: XRReferenceSpace | null = null;
   private isPlaced: boolean = false;
   private touchStartX: number = 0;
 
+  private hitTestSourceRequested: boolean = false;
+
   constructor(container: HTMLElement, droneEntity?: Drone) {
     this.scene = new THREE.Scene();
+    this.scene.background = null;
 
     this.camera = new THREE.PerspectiveCamera(
       70,
@@ -99,7 +101,7 @@ export class DroneScene {
     const controller = this.renderer.xr.getController(0);
     controller.addEventListener('select', () => {
       if (this.reticle && this.reticle.visible && this.droneModel && !this.isPlaced) {
-        this.droneModel.position.copy(this.reticle.position);
+        this.droneModel.position.setFromMatrixPosition(this.reticle.matrix);
         this.droneModel.visible = true;
         this.reticle.visible = false;
         this.isPlaced = true;
@@ -122,34 +124,33 @@ export class DroneScene {
     });
   }
 
-  private async requestHitTestSource(): Promise<void> {
-    const session = this.renderer.xr.getSession();
-    if (!session || !session.requestHitTestSource) return;
+  // @ts-ignore - timestamp requis par WebXR
+  private animate(_timestamp: number, frame: XRFrame | undefined): void {
+    if (frame) {
+      const referenceSpace = this.renderer.xr.getReferenceSpace();
 
-    this.referenceSpace = await session.requestReferenceSpace('local');
-    const hitTestSource = await session.requestHitTestSource({
-      space: this.referenceSpace,
-    });
-    if (hitTestSource) {
-      this.hitTestSource = hitTestSource;
-    }
-  }
+      if (!this.hitTestSourceRequested && referenceSpace) {
+        const session = this.renderer.xr.getSession();
+        // @ts-ignore - requestHitTestSource existe si la session XR supporte hit-test
+        if (session?.requestHitTestSource) {
+          // @ts-ignore
+          session.requestHitTestSource({ space: referenceSpace }).then((source: XRHitTestSource | undefined) => {
+            if (source) {
+              this.hitTestSource = source;
+            }
+          });
+          this.hitTestSourceRequested = true;
+        }
+      }
 
-  private animate(): void {
-    if (!this.hitTestSource && this.renderer.xr.getSession()) {
-      this.requestHitTestSource();
-    }
-
-    if (this.hitTestSource && this.reticle && !this.isPlaced) {
-      const frame = this.renderer.xr.getFrame();
-      if (frame) {
+      if (this.hitTestSource && this.reticle && !this.isPlaced) {
         const hitTestResults = frame.getHitTestResults(this.hitTestSource);
         if (hitTestResults.length > 0) {
           const hit = hitTestResults[0];
-          const pose = hit.getPose(this.referenceSpace!);
+          const pose = hit.getPose(referenceSpace!);
           if (pose) {
             this.reticle.visible = true;
-            this.reticle.position.copy(pose.transform.position);
+            this.reticle.matrix.fromArray(pose.transform.matrix);
           }
         } else {
           this.reticle.visible = false;
