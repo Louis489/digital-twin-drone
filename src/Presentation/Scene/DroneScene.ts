@@ -34,7 +34,25 @@ export class DroneScene {
     this.renderer.xr.enabled = true;
     container.appendChild(this.renderer.domElement);
 
-    const arButton = ARButton.createButton(this.renderer, this.createOverlayConfig());
+    // 1. Créer le conteneur UI en PREMIER (avant ARButton)
+    this.uiContainer = document.createElement('div');
+    this.uiContainer.id = 'ar-ui-container';
+    this.uiContainer.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 1000;
+    `;
+    document.body.appendChild(this.uiContainer);
+
+    // 2. Créer l'ARButton avec le conteneur existant
+    const arButton = ARButton.createButton(this.renderer, {
+      requiredFeatures: ['dom-overlay'],
+      domOverlay: { root: this.uiContainer }
+    });
     document.body.appendChild(arButton);
 
     if (droneEntity) {
@@ -42,7 +60,7 @@ export class DroneScene {
     }
 
     this.setupLights();
-    this.createDOMOverlay();
+    this.createDOMOverlay(); // Ajoute les boutons au conteneur existant
     this.loadDroneModel();
     this.setupXRController();
 
@@ -61,31 +79,18 @@ export class DroneScene {
   }
 
   private createDOMOverlay(): void {
-    // Création du conteneur UI
-    this.uiContainer = document.createElement('div');
-    this.uiContainer.id = 'ar-ui-container';
-    this.uiContainer.style.cssText = `
-      position: fixed;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      pointer-events: none;
-      z-index: 1000;
-      display: flex;
-      flex-direction: column;
-      justify-content: flex-end;
-      padding-bottom: 40px;
-    `;
+    if (!this.uiContainer) return;
 
-    // Menu en bas
+    // Conteneur pour le menu (en bas)
     const menu = document.createElement('div');
     menu.style.cssText = `
+      position: absolute;
+      bottom: 40px;
+      left: 0;
       width: 100%;
       display: flex;
       justify-content: center;
-      pointer-events: auto;
-      gap: 20px;
+      pointer-events: none;
     `;
 
     // Bouton "Faire apparaître ROV"
@@ -102,6 +107,7 @@ export class DroneScene {
       cursor: pointer;
       box-shadow: 0 4px 15px rgba(0,0,0,0.3);
       transition: transform 0.2s, box-shadow 0.2s;
+      pointer-events: auto;
     `;
     this.placeButton.addEventListener('mouseenter', () => {
       if (this.placeButton) {
@@ -119,15 +125,6 @@ export class DroneScene {
 
     menu.appendChild(this.placeButton);
     this.uiContainer.appendChild(menu);
-    document.body.appendChild(this.uiContainer);
-  }
-
-  private createOverlayConfig(): { requiredFeatures: string[]; domOverlay: { root: HTMLElement } } | undefined {
-    if (!this.uiContainer) return undefined;
-    return {
-      requiredFeatures: ['dom-overlay'],
-      domOverlay: { root: this.uiContainer }
-    };
   }
 
   private startPlacing(): void {
