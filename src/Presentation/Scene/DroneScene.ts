@@ -20,9 +20,9 @@ export class DroneScene {
       75,
       container.clientWidth / container.clientHeight,
       0.1,
-      1000
+      2000
     );
-    this.camera.position.set(10, 8, 10);
+    this.camera.position.set(30, 25, 30);
     this.camera.lookAt(0, 0, 0);
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
