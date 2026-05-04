@@ -15,6 +15,8 @@ export class DroneScene {
   private isPlaced: boolean = false;
   private uiContainer: HTMLDivElement | null = null;
   private placeButton: HTMLButtonElement | null = null;
+  private previousTouchX: number | null = null;
+  private previousTouchDistance: number | null = null;
 
   constructor(container: HTMLElement, droneEntity?: Drone) {
     this.scene = new THREE.Scene();
@@ -45,8 +47,17 @@ export class DroneScene {
       height: 100%;
       pointer-events: none;
       z-index: 1000;
+      display: none;
     `;
     document.body.appendChild(this.uiContainer);
+
+    // Afficher/cacher l'UI selon l'état de la session AR
+    this.renderer.xr.addEventListener('sessionstart', () => {
+      if (this.uiContainer) this.uiContainer.style.display = 'block';
+    });
+    this.renderer.xr.addEventListener('sessionend', () => {
+      if (this.uiContainer) this.uiContainer.style.display = 'none';
+    });
 
     // 2. Créer l'ARButton avec le conteneur existant
     const arButton = ARButton.createButton(this.renderer, {
@@ -63,6 +74,7 @@ export class DroneScene {
     this.createDOMOverlay(); // Ajoute les boutons au conteneur existant
     this.loadDroneModel();
     this.setupXRController();
+    this.setupTouchInteractions();
 
     this.handleResize(container);
     this.renderer.setAnimationLoop(this.animate.bind(this));
@@ -192,6 +204,54 @@ export class DroneScene {
     this.scene.add(controller);
   }
 
+  private setupTouchInteractions(): void {
+    window.addEventListener('touchstart', this.onTouchStart.bind(this), { passive: false });
+    window.addEventListener('touchmove', this.onTouchMove.bind(this), { passive: false });
+  }
+
+  private onTouchStart(event: TouchEvent): void {
+    if (event.touches.length === 1) {
+      this.previousTouchX = event.touches[0].pageX;
+      this.previousTouchDistance = null;
+    } else if (event.touches.length === 2) {
+      const dx = event.touches[0].pageX - event.touches[1].pageX;
+      const dy = event.touches[0].pageY - event.touches[1].pageY;
+      this.previousTouchDistance = Math.hypot(dx, dy);
+      this.previousTouchX = null;
+    }
+  }
+
+  private onTouchMove(event: TouchEvent): void {
+    // Ne fonctionne que si le ROV est chargé, visible et déjà posé
+    if (!this.droneModel || !this.droneModel.visible || this.isPlacing) {
+      return;
+    }
+
+    event.preventDefault();
+
+    if (event.touches.length === 1 && this.previousTouchX !== null) {
+      // Rotation à 1 doigt
+      const deltaX = event.touches[0].pageX - this.previousTouchX;
+      this.droneModel.rotation.y += deltaX * 0.01;
+      this.previousTouchX = event.touches[0].pageX;
+    } else if (event.touches.length === 2 && this.previousTouchDistance !== null) {
+      // Zoom pinch à 2 doigts
+      const dx = event.touches[0].pageX - event.touches[1].pageX;
+      const dy = event.touches[0].pageY - event.touches[1].pageY;
+      const currentDistance = Math.hypot(dx, dy);
+
+      const scaleFactor = currentDistance / this.previousTouchDistance;
+      this.droneModel.scale.multiplyScalar(scaleFactor);
+
+      // Garder-fou : borner l'échelle
+      const currentScale = this.droneModel.scale.x;
+      const clampedScale = THREE.MathUtils.clamp(currentScale, 0.002, 0.05);
+      this.droneModel.scale.set(clampedScale, clampedScale, clampedScale);
+
+      this.previousTouchDistance = currentDistance;
+    }
+  }
+
   private animate(): void {
     // Mode "fantôme" : le ROV suit à 2m devant la caméra
     if (this.isPlacing && this.droneModel) {
@@ -232,6 +292,8 @@ export class DroneScene {
     this.uiContainer = null;
 
     window.removeEventListener('resize', this.resizeHandler);
+    window.removeEventListener('touchstart', this.onTouchStart);
+    window.removeEventListener('touchmove', this.onTouchMove);
 
     if (this.droneModel) {
       this.droneModel.traverse((child) => {
