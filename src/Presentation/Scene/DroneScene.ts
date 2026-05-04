@@ -11,9 +11,10 @@ export class DroneScene {
   // @ts-ignore - conservé pour future intégration
   private droneEntity: Drone | null = null;
   private resizeHandler!: () => void;
+  private isPlacing: boolean = false;
   private isPlaced: boolean = false;
-  private isDragging: boolean = false;
   private uiContainer: HTMLDivElement | null = null;
+  private placeButton: HTMLButtonElement | null = null;
 
   constructor(container: HTMLElement, droneEntity?: Drone) {
     this.scene = new THREE.Scene();
@@ -87,10 +88,10 @@ export class DroneScene {
       gap: 20px;
     `;
 
-    // Bouton ROV
-    const rovButton = document.createElement('button');
-    rovButton.textContent = 'Placer ROV';
-    rovButton.style.cssText = `
+    // Bouton "Faire apparaître ROV"
+    this.placeButton = document.createElement('button');
+    this.placeButton.textContent = 'Faire apparaître ROV';
+    this.placeButton.style.cssText = `
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       color: white;
       border: none;
@@ -102,17 +103,21 @@ export class DroneScene {
       box-shadow: 0 4px 15px rgba(0,0,0,0.3);
       transition: transform 0.2s, box-shadow 0.2s;
     `;
-    rovButton.addEventListener('mouseenter', () => {
-      rovButton.style.transform = 'scale(1.05)';
-      rovButton.style.boxShadow = '0 6px 20px rgba(0,0,0,0.4)';
+    this.placeButton.addEventListener('mouseenter', () => {
+      if (this.placeButton) {
+        this.placeButton.style.transform = 'scale(1.05)';
+        this.placeButton.style.boxShadow = '0 6px 20px rgba(0,0,0,0.4)';
+      }
     });
-    rovButton.addEventListener('mouseleave', () => {
-      rovButton.style.transform = 'scale(1)';
-      rovButton.style.boxShadow = '0 4px 15px rgba(0,0,0,0.3)';
+    this.placeButton.addEventListener('mouseleave', () => {
+      if (this.placeButton) {
+        this.placeButton.style.transform = 'scale(1)';
+        this.placeButton.style.boxShadow = '0 4px 15px rgba(0,0,0,0.3)';
+      }
     });
-    rovButton.addEventListener('click', () => this.placeROV());
+    this.placeButton.addEventListener('click', () => this.startPlacing());
 
-    menu.appendChild(rovButton);
+    menu.appendChild(this.placeButton);
     this.uiContainer.appendChild(menu);
     document.body.appendChild(this.uiContainer);
   }
@@ -125,12 +130,31 @@ export class DroneScene {
     };
   }
 
-  private placeROV(): void {
-    if (this.droneModel && !this.isPlaced) {
-      // Position 1.5m devant la caméra
-      this.droneModel.position.set(0, -0.5, -1.5);
+  private startPlacing(): void {
+    if (this.droneModel && !this.isPlaced && !this.isPlacing) {
+      // Le ROV apparaît à 2m devant, en mode placement
+      this.droneModel.position.set(0, -0.5, -2);
       this.droneModel.visible = true;
+      this.isPlacing = true;
+
+      // Changer le texte du bouton pour indiquer qu'on peut poser
+      if (this.placeButton) {
+        this.placeButton.textContent = 'Touchez l\'écran pour poser';
+        this.placeButton.style.opacity = '0.7';
+      }
+    }
+  }
+
+  private placeROV(): void {
+    if (this.isPlacing && this.droneModel) {
+      // Fixer la position actuelle
+      this.isPlacing = false;
       this.isPlaced = true;
+
+      // Masquer le bouton
+      if (this.placeButton) {
+        this.placeButton.style.display = 'none';
+      }
     }
   }
 
@@ -140,7 +164,7 @@ export class DroneScene {
       './IROV_AllInOne.glb',
       (gltf) => {
         const model = gltf.scene;
-        model.scale.set(0.1, 0.1, 0.1);
+        model.scale.set(0.08, 0.08, 0.08); // Échelle réaliste pour une chambre
         model.visible = false;
         model.traverse((child) => {
           if (child instanceof THREE.Mesh) {
@@ -161,35 +185,23 @@ export class DroneScene {
   private setupXRController(): void {
     const controller = this.renderer.xr.getController(0);
 
-    controller.addEventListener('selectstart', () => {
-      if (this.droneModel && this.isPlaced) {
-        // Vérifier si le rayon touche le ROV
-        const controllerPos = new THREE.Vector3();
-        controller.getWorldPosition(controllerPos);
-        const dronePos = this.droneModel.position;
-        const distance = controllerPos.distanceTo(dronePos);
-        if (distance < 0.5) {
-          this.isDragging = true;
-        }
+    // Événement select (tap sur écran) pour poser le ROV
+    controller.addEventListener('select', () => {
+      if (this.isPlacing) {
+        this.placeROV();
       }
-    });
-
-    controller.addEventListener('selectend', () => {
-      this.isDragging = false;
     });
 
     this.scene.add(controller);
   }
 
   private animate(): void {
-    // Mode drag : le ROV suit la position du contrôleur/téléphone
-    if (this.isDragging && this.droneModel) {
-      const controller = this.renderer.xr.getController(0);
-      const position = new THREE.Vector3();
-      controller.getWorldPosition(position);
-      // Ajuster la position pour tenir le ROV devant
-      this.droneModel.position.copy(position);
-      this.droneModel.position.z -= 0.3;
+    // Mode "fantôme" : le ROV suit à 2m devant la caméra
+    if (this.isPlacing && this.droneModel) {
+      // Position fixe relative à la caméra (devant, légèrement en bas)
+      const offset = new THREE.Vector3(0, -0.5, -2);
+      offset.applyMatrix4(this.camera.matrixWorld);
+      this.droneModel.position.copy(offset);
     }
 
     this.renderer.render(this.scene, this.camera);
@@ -219,6 +231,8 @@ export class DroneScene {
     if (this.uiContainer) {
       this.uiContainer.remove();
     }
+    this.placeButton = null;
+    this.uiContainer = null;
 
     window.removeEventListener('resize', this.resizeHandler);
 
