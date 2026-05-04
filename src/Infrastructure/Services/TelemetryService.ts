@@ -1,5 +1,3 @@
-/// <reference types="vite/client" />
-
 export interface TelemetryPoint {
   time: number;
   x: number;
@@ -9,7 +7,7 @@ export interface TelemetryPoint {
 }
 
 export class TelemetryService {
-  async loadTelemetryData(url: string = `${import.meta.env.BASE_URL}data/telemetry.csv`): Promise<TelemetryPoint[]> {
+  async loadTelemetryData(url: string = './data/telemetry.csv'): Promise<TelemetryPoint[]> {
     const response = await fetch(url);
     if (!response.ok) {
       throw new Error(`Failed to load telemetry: ${response.status} ${response.statusText}`);
