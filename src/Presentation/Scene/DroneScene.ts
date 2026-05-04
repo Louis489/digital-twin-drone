@@ -11,12 +11,9 @@ export class DroneScene {
   // @ts-ignore - conservé pour future intégration
   private droneEntity: Drone | null = null;
   private resizeHandler!: () => void;
-  private reticle: THREE.Mesh | null = null;
-  private hitTestSource: XRHitTestSource | null = null;
   private isPlaced: boolean = false;
-  private touchStartX: number = 0;
-
-  private hitTestSourceRequested: boolean = false;
+  private isDragging: boolean = false;
+  private uiContainer: HTMLDivElement | null = null;
 
   constructor(container: HTMLElement, droneEntity?: Drone) {
     this.scene = new THREE.Scene();
@@ -36,19 +33,17 @@ export class DroneScene {
     this.renderer.xr.enabled = true;
     container.appendChild(this.renderer.domElement);
 
-    document.body.appendChild(
-      ARButton.createButton(this.renderer, { requiredFeatures: ['hit-test'] })
-    );
+    const arButton = ARButton.createButton(this.renderer, this.createOverlayConfig());
+    document.body.appendChild(arButton);
 
     if (droneEntity) {
       this.droneEntity = droneEntity;
     }
 
     this.setupLights();
-    this.createReticle();
+    this.createDOMOverlay();
     this.loadDroneModel();
     this.setupXRController();
-    this.setupTouchRotation();
 
     this.handleResize(container);
     this.renderer.setAnimationLoop(this.animate.bind(this));
@@ -64,13 +59,79 @@ export class DroneScene {
     this.scene.add(directionalLight);
   }
 
-  private createReticle(): void {
-    const geometry = new THREE.RingGeometry(0.1, 0.12, 32);
-    const material = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
-    this.reticle = new THREE.Mesh(geometry, material);
-    this.reticle.rotation.x = -Math.PI / 2;
-    this.reticle.visible = false;
-    this.scene.add(this.reticle);
+  private createDOMOverlay(): void {
+    // Création du conteneur UI
+    this.uiContainer = document.createElement('div');
+    this.uiContainer.id = 'ar-ui-container';
+    this.uiContainer.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 1000;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      padding-bottom: 40px;
+    `;
+
+    // Menu en bas
+    const menu = document.createElement('div');
+    menu.style.cssText = `
+      width: 100%;
+      display: flex;
+      justify-content: center;
+      pointer-events: auto;
+      gap: 20px;
+    `;
+
+    // Bouton ROV
+    const rovButton = document.createElement('button');
+    rovButton.textContent = 'Placer ROV';
+    rovButton.style.cssText = `
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      padding: 16px 32px;
+      font-size: 18px;
+      font-weight: bold;
+      border-radius: 30px;
+      cursor: pointer;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+      transition: transform 0.2s, box-shadow 0.2s;
+    `;
+    rovButton.addEventListener('mouseenter', () => {
+      rovButton.style.transform = 'scale(1.05)';
+      rovButton.style.boxShadow = '0 6px 20px rgba(0,0,0,0.4)';
+    });
+    rovButton.addEventListener('mouseleave', () => {
+      rovButton.style.transform = 'scale(1)';
+      rovButton.style.boxShadow = '0 4px 15px rgba(0,0,0,0.3)';
+    });
+    rovButton.addEventListener('click', () => this.placeROV());
+
+    menu.appendChild(rovButton);
+    this.uiContainer.appendChild(menu);
+    document.body.appendChild(this.uiContainer);
+  }
+
+  private createOverlayConfig(): { requiredFeatures: string[]; domOverlay: { root: HTMLElement } } | undefined {
+    if (!this.uiContainer) return undefined;
+    return {
+      requiredFeatures: ['dom-overlay'],
+      domOverlay: { root: this.uiContainer }
+    };
+  }
+
+  private placeROV(): void {
+    if (this.droneModel && !this.isPlaced) {
+      // Position 1.5m devant la caméra
+      this.droneModel.position.set(0, -0.5, -1.5);
+      this.droneModel.visible = true;
+      this.isPlaced = true;
+    }
   }
 
   private loadDroneModel(): void {
@@ -99,63 +160,36 @@ export class DroneScene {
 
   private setupXRController(): void {
     const controller = this.renderer.xr.getController(0);
-    controller.addEventListener('select', () => {
-      if (this.reticle && this.reticle.visible && this.droneModel && !this.isPlaced) {
-        this.droneModel.position.setFromMatrixPosition(this.reticle.matrix);
-        this.droneModel.visible = true;
-        this.reticle.visible = false;
-        this.isPlaced = true;
+
+    controller.addEventListener('selectstart', () => {
+      if (this.droneModel && this.isPlaced) {
+        // Vérifier si le rayon touche le ROV
+        const controllerPos = new THREE.Vector3();
+        controller.getWorldPosition(controllerPos);
+        const dronePos = this.droneModel.position;
+        const distance = controllerPos.distanceTo(dronePos);
+        if (distance < 0.5) {
+          this.isDragging = true;
+        }
       }
     });
+
+    controller.addEventListener('selectend', () => {
+      this.isDragging = false;
+    });
+
     this.scene.add(controller);
   }
 
-  private setupTouchRotation(): void {
-    window.addEventListener('touchstart', (e) => {
-      this.touchStartX = e.touches[0].clientX;
-    });
-
-    window.addEventListener('touchmove', (e) => {
-      if (this.isPlaced && this.droneModel) {
-        const deltaX = e.touches[0].clientX - this.touchStartX;
-        this.droneModel.rotation.y += deltaX * 0.01;
-        this.touchStartX = e.touches[0].clientX;
-      }
-    });
-  }
-
-  // @ts-ignore - timestamp requis par WebXR
-  private animate(_timestamp: number, frame: XRFrame | undefined): void {
-    if (frame) {
-      const referenceSpace = this.renderer.xr.getReferenceSpace();
-
-      if (!this.hitTestSourceRequested && referenceSpace) {
-        const session = this.renderer.xr.getSession();
-        // @ts-ignore - requestHitTestSource existe si la session XR supporte hit-test
-        if (session?.requestHitTestSource) {
-          // @ts-ignore
-          session.requestHitTestSource({ space: referenceSpace }).then((source: XRHitTestSource | undefined) => {
-            if (source) {
-              this.hitTestSource = source;
-            }
-          });
-          this.hitTestSourceRequested = true;
-        }
-      }
-
-      if (this.hitTestSource && this.reticle && !this.isPlaced) {
-        const hitTestResults = frame.getHitTestResults(this.hitTestSource);
-        if (hitTestResults.length > 0) {
-          const hit = hitTestResults[0];
-          const pose = hit.getPose(referenceSpace!);
-          if (pose) {
-            this.reticle.visible = true;
-            this.reticle.matrix.fromArray(pose.transform.matrix);
-          }
-        } else {
-          this.reticle.visible = false;
-        }
-      }
+  private animate(): void {
+    // Mode drag : le ROV suit la position du contrôleur/téléphone
+    if (this.isDragging && this.droneModel) {
+      const controller = this.renderer.xr.getController(0);
+      const position = new THREE.Vector3();
+      controller.getWorldPosition(position);
+      // Ajuster la position pour tenir le ROV devant
+      this.droneModel.position.copy(position);
+      this.droneModel.position.z -= 0.3;
     }
 
     this.renderer.render(this.scene, this.camera);
@@ -182,13 +216,11 @@ export class DroneScene {
       arButton.remove();
     }
 
-    window.removeEventListener('resize', this.resizeHandler);
-
-    if (this.reticle) {
-      this.reticle.geometry.dispose();
-      (this.reticle.material as THREE.Material).dispose();
-      this.scene.remove(this.reticle);
+    if (this.uiContainer) {
+      this.uiContainer.remove();
     }
+
+    window.removeEventListener('resize', this.resizeHandler);
 
     if (this.droneModel) {
       this.droneModel.traverse((child) => {
