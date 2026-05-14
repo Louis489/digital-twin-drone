@@ -143,9 +143,10 @@ this.camera.updateProjectionMatrix(); // Indispensable pour valider le changemen
         seabedGeo.computeVertexNormals(); // Recalcule les ombres
 
         const seabedTextureLoader = new THREE.TextureLoader();
-        const seabedColorMap = seabedTextureLoader.load('/seabed/textures/coral_gravel_diff_2k.jpg');
-        const seabedNormalMap = seabedTextureLoader.load('/seabed/textures/coral_gravel_nor_gl_2k.jpg');
-        const seabedRoughnessMap = seabedTextureLoader.load('/seabed/textures/coral_gravel_rough_2k.jpg');
+        const seabedBaseUrl = import.meta.env.BASE_URL + 'seabed/';
+        const seabedColorMap = seabedTextureLoader.load(seabedBaseUrl + 'textures/coral_gravel_diff_2k.jpg');
+        const seabedNormalMap = seabedTextureLoader.load(seabedBaseUrl + 'textures/coral_gravel_nor_gl_2k.jpg');
+        const seabedRoughnessMap = seabedTextureLoader.load(seabedBaseUrl + 'textures/coral_gravel_rough_2k.jpg');
         for (const texture of [seabedColorMap, seabedNormalMap, seabedRoughnessMap]) {
             texture.wrapS = THREE.RepeatWrapping;
             texture.wrapT = THREE.RepeatWrapping;
@@ -262,8 +263,12 @@ this.camera.updateProjectionMatrix(); // Indispensable pour valider le changemen
 
         // Correction "Pro" du PointerLock - désactivé par défaut
         const startControls = () => {
-            if (this.controls && !this.controls.isLocked && this.isSimulationActive) {
-                this.controls.lock();
+            if (this.controls && !this.controls.isLocked && this.isSimulationActive && document.pointerLockElement === null) {
+                try {
+                    this.controls.lock();
+                } catch (error) {
+                    console.warn('PointerLock ignoré : action utilisateur requise ou verrouillage interrompu.', error);
+                }
             }
         };
         this.mouseDownHandler = startControls;
