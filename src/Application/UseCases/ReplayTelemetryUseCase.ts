@@ -7,10 +7,15 @@ export class ReplayTelemetryUseCase {
   private currentIndex: number = 0;
   private animationId: number | null = null;
   private speedMultiplier: number = 1;
+  private onTelemetryUpdate: ((point: TelemetryPoint) => void) | null = null;
 
   constructor(drone: Drone, telemetryData: TelemetryPoint[]) {
     this.drone = drone;
     this.telemetryData = telemetryData;
+  }
+
+  setOnTelemetryUpdate(callback: (point: TelemetryPoint) => void): void {
+    this.onTelemetryUpdate = callback;
   }
 
   start(): void {
@@ -45,6 +50,11 @@ export class ReplayTelemetryUseCase {
 
     this.drone.updateLocalPosition(newPosition);
     this.drone.updateRotationY(point.heading);
+
+    // Envoi des données vers le ThreeShipService si callback défini
+    if (this.onTelemetryUpdate) {
+      this.onTelemetryUpdate(point);
+    }
 
     this.currentIndex++;
 

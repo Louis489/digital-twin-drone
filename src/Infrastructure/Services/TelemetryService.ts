@@ -4,6 +4,8 @@ export interface TelemetryPoint {
   y: number;
   z: number;
   heading: number;
+  depth?: number;  // Profondeur pour le ROV
+  temp?: number;   // Température pour l'UI
 }
 
 export class TelemetryService {
@@ -22,15 +24,21 @@ export class TelemetryService {
       if (!line) continue;
 
       const parts = line.split(',');
-      if (parts.length >= 5) {
-        data.push({
-          time: parseFloat(parts[0]),
-          x: parseFloat(parts[1]),
-          y: parseFloat(parts[2]),
-          z: parseFloat(parts[3]),
-          heading: parseFloat(parts[4]),
-        });
-      }
+      if (parts.length < 5) continue; // Ligne invalide
+
+      // On s'assure de bien mapper les colonnes du CSV généré
+      const depthValue = parts[5] ? parseFloat(parts[5]) : parseFloat(parts[3]); // Utilise Z si Depth absent
+      const tempValue = parts[6] ? parseFloat(parts[6]) : 20.0 + Math.random(); // Fallback temp
+
+      data.push({
+        time: parseFloat(parts[0]),
+        x: parseFloat(parts[1]),
+        y: parseFloat(parts[2]),
+        z: parseFloat(parts[3]),
+        heading: parseFloat(parts[4]),
+        depth: isNaN(depthValue) ? 0 : depthValue,
+        temp: isNaN(tempValue) ? 20 : tempValue
+      });
     }
 
     return data;

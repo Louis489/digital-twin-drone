@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { ARButton } from 'three/examples/jsm/webxr/ARButton.js';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { Drone } from '../../Domain/Entities/Drone';
 
 export class DroneScene {
@@ -17,10 +18,16 @@ export class DroneScene {
   private placeButton: HTMLButtonElement | null = null;
   private previousTouchX: number | null = null;
   private previousTouchDistance: number | null = null;
+  private showroomGroup: THREE.Group | null = null;
+  private controls: OrbitControls | null = null;
+  private partsMenu: HTMLDivElement | null = null;
 
   constructor(container: HTMLElement, droneEntity?: Drone) {
     this.scene = new THREE.Scene();
-    this.scene.background = null;
+    // Fond et brouillard studio infini
+    const bgColor = new THREE.Color(0x1a1c22);
+    this.scene.background = bgColor;
+    this.scene.fog = new THREE.FogExp2(bgColor, 0.08);
 
     this.camera = new THREE.PerspectiveCamera(
       70,
@@ -28,6 +35,7 @@ export class DroneScene {
       0.01,
       20
     );
+    this.camera.position.set(0, 1.0, 5.0); // Vue d'ensemble élégante du showroom
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     this.renderer.setSize(container.clientWidth, container.clientHeight);
@@ -35,6 +43,33 @@ export class DroneScene {
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.xr.enabled = true;
     container.appendChild(this.renderer.domElement);
+
+    // Créer le menu de démontage interactif (PC uniquement)
+    this.partsMenu = document.createElement('div');
+    this.partsMenu.id = 'parts-menu';
+    this.partsMenu.style.cssText = `
+      position: absolute;
+      right: 20px;
+      top: 50%;
+      transform: translateY(-50%);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      z-index: 100;
+      max-height: 70vh;
+      overflow-y: auto;
+      background: rgba(20, 22, 28, 0.8);
+      padding: 15px;
+      border-radius: 10px;
+      border: 1px solid #444;
+      color: white;
+      font-family: sans-serif;
+    `;
+    const title = document.createElement('h3');
+    title.textContent = 'COMPOSANTS';
+    title.style.cssText = 'margin-top: 0; margin-bottom: 10px; font-size: 14px; text-align: center;';
+    this.partsMenu.appendChild(title);
+    document.body.appendChild(this.partsMenu);
 
     // 1. Créer le conteneur UI en PREMIER (avant ARButton)
     this.uiContainer = document.createElement('div');
@@ -54,9 +89,38 @@ export class DroneScene {
     // Afficher/cacher l'UI selon l'état de la session AR
     this.renderer.xr.addEventListener('sessionstart', () => {
       if (this.uiContainer) this.uiContainer.style.display = 'block';
+      // Cacher le showroom et préparer le ROV pour l'AR
+      if (this.showroomGroup) this.showroomGroup.visible = false;
+      this.scene.background = null;
+      this.scene.fog = null; // Désactiver le brouillard en AR
+      if (this.droneModel) {
+        this.droneModel.visible = false;
+        this.droneModel.scale.set(0.008, 0.008, 0.008); // Échelle AR minuscule (8mm)
+      }
+      if (this.controls) this.controls.enabled = false;
+      if (this.partsMenu) this.partsMenu.style.display = 'none'; // Cacher le menu en AR
     });
     this.renderer.xr.addEventListener('sessionend', () => {
       if (this.uiContainer) this.uiContainer.style.display = 'none';
+      // Réafficher le showroom et repositionner le ROV
+      if (this.showroomGroup) this.showroomGroup.visible = true;
+      const bgColor = new THREE.Color(0x1a1c22);
+      this.scene.background = bgColor;
+      this.scene.fog = new THREE.FogExp2(bgColor, 0.08); // Réactiver le brouillard
+      if (this.droneModel) {
+        this.droneModel.visible = true;
+        this.droneModel.position.set(0, 0.6, 0); // Sur le socle en verre
+        this.droneModel.scale.set(0.018, 0.018, 0.018); // Échelle showroom PC (8cm)
+      }
+      this.isPlaced = false;
+      this.isPlacing = false;
+      if (this.placeButton) {
+        this.placeButton.style.display = 'block';
+        this.placeButton.textContent = 'Faire apparaître ROV';
+        this.placeButton.style.opacity = '1';
+      }
+      if (this.controls) this.controls.enabled = true;
+      if (this.partsMenu) this.partsMenu.style.display = 'flex'; // Réafficher le menu
     });
 
     // 2. Créer l'ARButton avec le conteneur existant
@@ -66,28 +130,139 @@ export class DroneScene {
     });
     document.body.appendChild(arButton);
 
+    // 3. Supprimer le bouton "AR NOT SUPPORTED" sur PC
+    setTimeout(() => {
+      const arBtn = document.getElementById('ARButton');
+      if (arBtn && arBtn.textContent?.includes('NOT SUPPORTED')) {
+        arBtn.style.display = 'none';
+      }
+    }, 500);
+
     if (droneEntity) {
       this.droneEntity = droneEntity;
     }
 
+    this.setupShowroom();
     this.setupLights();
     this.createDOMOverlay(); // Ajoute les boutons au conteneur existant
     this.loadDroneModel();
     this.setupXRController();
     this.setupTouchInteractions();
+    this.setupOrbitControls();
 
     this.handleResize(container);
     this.renderer.setAnimationLoop(this.animate.bind(this));
   }
 
   private setupLights(): void {
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+    // Lumière d'ambiance douce
+    const ambientLight = new THREE.AmbientLight(0x404040, 0.6);
     this.scene.add(ambientLight);
 
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
-    directionalLight.position.set(5, 10, 5);
-    directionalLight.castShadow = true;
-    this.scene.add(directionalLight);
+    // Spot principal venant d'en haut à droite (éclairage d'exposition)
+    const mainSpot = new THREE.SpotLight(0xffffff, 2);
+    mainSpot.position.set(3, 5, 3);
+    mainSpot.target.position.set(0, 0.5, 0);
+    mainSpot.angle = Math.PI / 6;
+    mainSpot.penumbra = 0.2;
+    mainSpot.castShadow = true;
+    mainSpot.shadow.mapSize.width = 2048;
+    mainSpot.shadow.mapSize.height = 2048;
+    this.scene.add(mainSpot);
+    this.scene.add(mainSpot.target);
+
+    // Contre-jour pour détacher le ROV du fond
+    const rimLight = new THREE.SpotLight(0xffffff, 1);
+    rimLight.position.set(-2, 3, -4);
+    rimLight.target.position.set(0, 0.5, 0);
+    rimLight.angle = Math.PI / 4;
+    rimLight.penumbra = 0.3;
+    this.scene.add(rimLight);
+    this.scene.add(rimLight.target);
+
+    // Lumière de remplissage douce
+    const fillLight = new THREE.DirectionalLight(0x88aaff, 0.3);
+    fillLight.position.set(-5, 2, 5);
+    this.scene.add(fillLight);
+  }
+
+  private setupShowroom(): void {
+    this.showroomGroup = new THREE.Group();
+
+    // Sol très large (studio infini)
+    const floorGeometry = new THREE.PlaneGeometry(50, 50);
+    const floorMaterial = new THREE.MeshStandardMaterial({
+      color: 0x111111,
+      roughness: 0.8,
+      metalness: 0.2,
+    });
+    const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.y = -0.51;
+    floor.receiveShadow = true;
+    this.showroomGroup.add(floor);
+
+    // Grille d'ingénierie (laboratoire de conception)
+    const grid = new THREE.GridHelper(50, 50, 0x00aaff, 0x444444);
+    grid.position.y = -0.5;
+    this.showroomGroup.add(grid);
+
+    // Base en métal brossé
+    const baseGeometry = new THREE.CylinderGeometry(1.2, 1.3, 0.15, 64);
+    const baseMaterial = new THREE.MeshStandardMaterial({
+      color: 0x2a2a2a,
+      metalness: 0.7,
+      roughness: 0.4,
+    });
+    const base = new THREE.Mesh(baseGeometry, baseMaterial);
+    base.position.y = -0.6;
+    base.receiveShadow = true;
+    this.showroomGroup.add(base);
+
+    // Surface en verre trempé fumé
+    const glassGeometry = new THREE.CylinderGeometry(1.0, 1.0, 0.05, 64);
+    const glassMaterial = new THREE.MeshPhysicalMaterial({
+      color: 0xffffff,
+      metalness: 0.1,
+      roughness: 0.05,
+      transmission: 0.6,
+      thickness: 0.5,
+      transparent: true,
+      opacity: 0.3,
+    });
+    const glass = new THREE.Mesh(glassGeometry, glassMaterial);
+    glass.position.y = -0.5;
+    glass.receiveShadow = true;
+    this.showroomGroup.add(glass);
+
+    // Anneau LED bleu fin autour du socle
+    const ledRingGeometry = new THREE.TorusGeometry(1.25, 0.02, 16, 100);
+    const ledRingMaterial = new THREE.MeshBasicMaterial({
+      color: 0x00aaff,
+      transparent: true,
+      opacity: 0.8,
+    });
+    const ledRing = new THREE.Mesh(ledRingGeometry, ledRingMaterial);
+    ledRing.rotation.x = -Math.PI / 2;
+    ledRing.position.y = -0.5;
+    this.showroomGroup.add(ledRing);
+
+    // Lumière ponctuelle LED subtile
+    const ledLight = new THREE.PointLight(0x00aaff, 0.5, 3);
+    ledLight.position.set(0, -0.4, 0);
+    this.showroomGroup.add(ledLight);
+
+    this.scene.add(this.showroomGroup);
+  }
+
+  private setupOrbitControls(): void {
+    this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+    this.controls.enableDamping = true;
+    this.controls.dampingFactor = 0.05;
+    this.controls.minDistance = 2.5; // Bloquer le zoom minimum
+    this.controls.maxDistance = 8;
+    this.controls.target.set(0, 0.5, 0); // Centré sur le ROV et le socle
+    this.controls.update();
   }
 
   private createDOMOverlay(): void {
@@ -173,8 +348,52 @@ export class DroneScene {
       './IROV_AllInOne.glb',
       (gltf) => {
         const model = gltf.scene;
-        model.scale.set(0.008, 0.008, 0.008); // Échelle minuscule (8mm) pour AR
-        model.visible = false;
+        // Mode showroom PC : échelle 8cm, positionné sur le verre
+        model.scale.set(0.018, 0.018, 0.018);
+        model.position.set(0, 0.6, 0); // Affleurant la surface en verre
+        model.visible = true;
+
+        // Analyse du modèle et création des boutons de démontage (12 composants majeurs)
+        const importantParts: { [key: string]: string } = {
+          'Arm_and_Camera_Body_1': 'Bras de Caméra',
+          'Camera_Head': 'Tête de Caméra',
+          'Laser_Body': 'Corps du Laser',
+          'Laser_Head': 'Tête du Laser',
+          'HT1_Propeller': 'Propulseur Horiz. Avant Gauche',
+          'HT2_Propeller': 'Propulseur Horiz. Avant Droit',
+          'HT3_Propeller': 'Propulseur Horiz. Arrière Gauche',
+          'HT4_Propeller': 'Propulseur Horiz. Arrière Droit',
+          'VT1_Propeller': 'Propulseur Vert. Avant Gauche',
+          'VT2_Propeller': 'Propulseur Vert. Avant Droit',
+          'VT3_Blades': 'Propulseur Vert. Arrière Gauche',
+          'VT4_Propeller': 'Propulseur Vert. Arrière Droit',
+        };
+
+        model.traverse((child) => {
+          // @ts-ignore - isMesh existe sur les objets Three.js
+          if (child.isMesh && child.name && importantParts[child.name] && this.partsMenu) {
+            const btn = document.createElement('button');
+            btn.textContent = importantParts[child.name];
+            btn.style.cssText =
+              'background: #2a2d35; color: white; border: none; padding: 8px 12px; border-radius: 5px; cursor: pointer; text-align: left; transition: 0.2s; font-size: 13px; border-left: 3px solid #00aaff;';
+
+            btn.onmouseenter = () => {
+              btn.style.background = '#3a3d45';
+            };
+            btn.onmouseleave = () => {
+              btn.style.background = '#2a2d35';
+            };
+
+            btn.onclick = () => {
+              child.visible = !child.visible;
+              btn.style.opacity = child.visible ? '1' : '0.4';
+              btn.style.borderLeft = child.visible ? '3px solid #00aaff' : '3px solid transparent';
+            };
+
+            this.partsMenu.appendChild(btn);
+          }
+        });
+
         model.traverse((child) => {
           if (child instanceof THREE.Mesh) {
             child.castShadow = true;
@@ -253,14 +472,20 @@ export class DroneScene {
   }
 
   private animate(): void {
-    // Mode "fantôme" : le ROV suit à 2m devant la caméra
+    // Mode AR : le ROV suit la caméra en mode placement
     if (this.isPlacing && this.droneModel) {
-      // Position fixe relative à la caméra (devant, légèrement en bas)
       const offset = new THREE.Vector3(0, -0.5, -2);
       offset.applyMatrix4(this.camera.matrixWorld);
       this.droneModel.position.copy(offset);
     }
 
+    // Mode showroom : rotation lente élégante si pas en AR
+    if (!this.renderer.xr.isPresenting && this.showroomGroup && this.droneModel) {
+      this.showroomGroup.rotation.y += 0.003;
+      this.droneModel.rotation.y += 0.003;
+    }
+
+    if (this.controls) this.controls.update();
     this.renderer.render(this.scene, this.camera);
   }
 
@@ -291,9 +516,24 @@ export class DroneScene {
     this.placeButton = null;
     this.uiContainer = null;
 
+    if (this.partsMenu) {
+      this.partsMenu.remove();
+    }
+    this.partsMenu = null;
+
     window.removeEventListener('resize', this.resizeHandler);
     window.removeEventListener('touchstart', this.onTouchStart);
     window.removeEventListener('touchmove', this.onTouchMove);
+
+    if (this.controls) {
+      this.controls.dispose();
+      this.controls = null;
+    }
+
+    if (this.showroomGroup) {
+      this.scene.remove(this.showroomGroup);
+      this.showroomGroup = null;
+    }
 
     if (this.droneModel) {
       this.droneModel.traverse((child) => {

@@ -35,8 +35,51 @@
     </style>
   </head>
   <body>
+    <div id="ui-panel" style="position: absolute; top: 20px; left: 20px; z-index: 100; background: rgba(0,0,0,0.7); color: white; padding: 15px; border-radius: 8px; font-family: sans-serif;">
+        <h3>Data Oceano</h3>
+        <label>
+            <input type="checkbox" id="toggle-bathy"> Activer Bathymétrie GEBCO
+        </label>
+        <div id="bathy-legend" style="display: none; margin-top: 15px; font-size: 12px;">
+            <div style="margin-bottom: 5px;">Profondeur (m)</div>
+            <div style="background: linear-gradient(to right, #000033, #0044cc, #00aaff, #aaffff); height: 10px; width: 100%; border-radius: 3px;"></div>
+            <div style="display: flex; justify-content: space-between; margin-top: 3px;">
+                <span>-8000</span>
+                <span>-4000</span>
+                <span>-1000</span>
+                <span>0</span>
+            </div>
+        </div>
+    </div>
     <button id="back-button">Retour au Globe</button>
-    <div id="canvas-container"></div>
+    
+    <div id="app">
+        <div id="cesium-container" style="width: 100vw; height: 100vh;"></div>
+        
+        <div id="loading-screen" style="display: none; position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; background: #000; color: #fff; z-index: 1000; flex-direction: column; justify-content: center; align-items: center; font-family: sans-serif;">
+            <h2>Génération du Jumeau Numérique...</h2>
+            <p>Chargement de l'environnement naval</p>
+        </div>
+
+        <div id="three-container" style="display: none; width: 100vw; height: 100vh;"></div>
+        <div id="fps-ui" style="display: none;">
+            <div style="position: absolute; top: 50%; left: 50%; width: 4px; height: 4px; background: white; border-radius: 50%; transform: translate(-50%, -50%); z-index: 1001; pointer-events: none;"></div>
+            <div id="blocker" style="position: absolute; width: 100vw; height: 100vh; background-color: rgba(0,0,0,0.5); z-index: 1000; display: flex; flex-direction: column; justify-content: center; align-items: center; color: white; font-family: sans-serif; cursor: pointer;">
+                <h2>Cliquez pour explorer le navire</h2>
+                <p>Z, Q, S, D ou Flèches pour marcher | Souris pour regarder | Échap pour mettre en pause</p>
+            </div>
+            <button id="btn-ar-toggle" style="position: absolute; top: 20px; right: 20px; z-index: 1002; padding: 15px 25px; background: rgba(0, 50, 60, 0.3); border: 2px solid #00aaaa; border-radius: 8px; color: #00aaaa; font-weight: bold; font-family: monospace; font-size: 16px; cursor: pointer; text-shadow: 0 0 5px rgba(0, 170, 170, 0.5); box-shadow: 0 0 10px rgba(0, 170, 170, 0.3); pointer-events: auto;">
+                [ ACTIVER VISION AR ]
+            </button>
+            <div id="ar-data-panel" style="display: none; position: absolute; top: 80px; right: 20px; background: rgba(0, 10, 20, 0.9); border: 1px solid #00aaaa; color: #00aaaa; padding: 15px; font-family: monospace; border-radius: 5px; pointer-events: none; text-shadow: 0 0 5px rgba(0, 170, 170, 0.5);">
+                <div style="font-size: 12px; opacity: 0.8; margin-bottom: 5px;">>>> ROV TELEMETRY_</div>
+                <div>PROFONDEUR: <span id="data-depth">25.30</span> m</div>
+                <div>TEMPÉRATURE: <span id="data-temp">-2.11</span> °C</div>
+                <div style="margin-top: 10px; height: 2px; background: linear-gradient(90deg, #00aaaa, transparent); width: 100%;" id="data-bar"></div>
+            </div>
+        </div>
+    </div>
+    
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
