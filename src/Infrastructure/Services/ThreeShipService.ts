@@ -17,13 +17,7 @@ export class ThreeShipService {
     private controls!: PointerLockControls;
     private water!: Water;
     private rovCamera!: THREE.PerspectiveCamera;
-    private moveForward = false;
-    private moveBackward = false;
-    private moveLeft = false;
-    private moveRight = false;
     private prevTime = performance.now();
-    private velocity = new THREE.Vector3();
-    private direction = new THREE.Vector3();
     private drone: THREE.Group | null = null;
     private originalDroneMaterials: Map<THREE.Mesh, THREE.Material | THREE.Material[]> = new Map();
     private arMaterial = new THREE.MeshLambertMaterial({ 
@@ -34,7 +28,6 @@ export class ThreeShipService {
         emissive: 0x00aaaa, // Bleu plus subtil
         emissiveIntensity: 0.3 // Moins éclatant pour la nuit
     });
-    private isARActive = false;
     private shipModel: THREE.Group | null = null;
     
     // Physique FPS Octree
@@ -316,8 +309,6 @@ this.camera.updateProjectionMatrix(); // Indispensable pour valider le changemen
     }
 
     public toggleARMode(isActive: boolean) {
-        this.isARActive = isActive;
-        
         // 1. Afficher/masquer le panneau de données AR
         const dataPanel = document.getElementById('ar-data-panel');
         if (dataPanel) dataPanel.style.display = isActive ? 'block' : 'none';
@@ -405,7 +396,7 @@ this.camera.updateProjectionMatrix(); // Indispensable pour valider le changemen
         }
     }
 
-    public update(telemetry: any) {
+    public update() {
         if (!this.drone) return;
         
         // Mouvement orbital autour de la turbine

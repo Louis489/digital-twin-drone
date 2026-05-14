@@ -46,7 +46,7 @@ function startTelemetryReplay(): void {
       const tempElement = document.getElementById('data-temp');
       
       replay.setOnTelemetryUpdate((point) => {
-        threeShipService!.update(point);
+        threeShipService!.update();
         
         // MISE À JOUR DE L'UI
         if (depthElement) depthElement.innerText = Number(point.depth).toFixed(2);
