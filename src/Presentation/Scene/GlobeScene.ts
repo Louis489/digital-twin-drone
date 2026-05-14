@@ -126,14 +126,11 @@ export class GlobeScene {
     const viewer = this.getViewer();
     if (!viewer) return;
     const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
-    handler.setInputAction((click: any) => {
+    handler.setInputAction((click: Cesium.ScreenSpaceEventHandler.PositionedEvent) => {
       const pickedObject = viewer.scene.pick(click.position);
       // Si on a cliqué sur N'IMPORTE QUEL objet 3D sur le globe
       if (Cesium.defined(pickedObject)) {
-        console.log("📍 [DEBUG] Objet 3D détecté au clic ! Lancement de la transition...");
         callback();
-      } else {
-        console.log("💧 [DEBUG] Clic dans l'eau ou sur le globe vide.");
       }
     }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
   }

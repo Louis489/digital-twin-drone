@@ -2,15 +2,12 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { ARButton } from 'three/examples/jsm/webxr/ARButton.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { Drone } from '../../Domain/Entities/Drone';
 
 export class DroneScene {
   private scene: THREE.Scene;
   private camera: THREE.PerspectiveCamera;
   private renderer: THREE.WebGLRenderer;
   private droneModel: THREE.Group | null = null;
-  // @ts-ignore - conservé pour future intégration
-  private droneEntity: Drone | null = null;
   private resizeHandler!: () => void;
   private isPlacing: boolean = false;
   private isPlaced: boolean = false;
@@ -21,8 +18,9 @@ export class DroneScene {
   private showroomGroup: THREE.Group | null = null;
   private controls: OrbitControls | null = null;
   private partsMenu: HTMLDivElement | null = null;
+  private placementOffset = new THREE.Vector3(0, -0.5, -2);
 
-  constructor(container: HTMLElement, droneEntity?: Drone) {
+  constructor(container: HTMLElement) {
     this.scene = new THREE.Scene();
     // Fond et brouillard studio infini
     const bgColor = new THREE.Color(0x1a1c22);
@@ -137,10 +135,6 @@ export class DroneScene {
         arBtn.style.display = 'none';
       }
     }, 500);
-
-    if (droneEntity) {
-      this.droneEntity = droneEntity;
-    }
 
     this.setupShowroom();
     this.setupLights();
@@ -370,8 +364,7 @@ export class DroneScene {
         };
 
         model.traverse((child) => {
-          // @ts-ignore - isMesh existe sur les objets Three.js
-          if (child.isMesh && child.name && importantParts[child.name] && this.partsMenu) {
+          if (child instanceof THREE.Mesh && child.name && importantParts[child.name] && this.partsMenu) {
             const btn = document.createElement('button');
             btn.textContent = importantParts[child.name];
             btn.style.cssText =
@@ -474,9 +467,9 @@ export class DroneScene {
   private animate(): void {
     // Mode AR : le ROV suit la caméra en mode placement
     if (this.isPlacing && this.droneModel) {
-      const offset = new THREE.Vector3(0, -0.5, -2);
-      offset.applyMatrix4(this.camera.matrixWorld);
-      this.droneModel.position.copy(offset);
+      this.placementOffset.set(0, -0.5, -2);
+      this.placementOffset.applyMatrix4(this.camera.matrixWorld);
+      this.droneModel.position.copy(this.placementOffset);
     }
 
     // Mode showroom : rotation lente élégante si pas en AR
@@ -496,10 +489,6 @@ export class DroneScene {
       this.renderer.setSize(container.clientWidth, container.clientHeight);
     };
     window.addEventListener('resize', this.resizeHandler);
-  }
-
-  setDroneEntity(drone: Drone): void {
-    this.droneEntity = drone;
   }
 
   dispose(): void {

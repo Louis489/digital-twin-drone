@@ -1,6 +1,5 @@
 export class StartMissionUseCase {
     public async execute(): Promise<void> {
-        console.log("🚀 [StartMission] UseCase déclenché ! Masquage de Cesium...");
         const cesiumDiv = document.getElementById('cesium-container');
         const loaderDiv = document.getElementById('loading-screen');
         const threeDiv = document.getElementById('three-container');

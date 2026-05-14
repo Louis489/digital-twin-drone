@@ -16,7 +16,6 @@ export class CesiumOceanoService implements IOceanoService {
     public enableBathymetryLayer(): void {
         if (this.bathymetryLayer) {
             this.bathymetryLayer.show = true;
-            console.log("🌊 [OceanoService] Couche WMS Activée");
             return;
         }
 
@@ -33,13 +32,11 @@ export class CesiumOceanoService implements IOceanoService {
         this.bathymetryLayer = this.viewer.imageryLayers.addImageryProvider(wmsProvider);
         // Transparence à 0.6 pour que les couleurs bleues se mélangent bien avec le fond satellite
         this.bathymetryLayer.alpha = 0.6;
-        console.log("🌊 [OceanoService] Couche WMS Activée");
     }
 
     public disableBathymetryLayer(): void {
         if (this.bathymetryLayer) {
             this.bathymetryLayer.show = false;
-            console.log("🏜️ [OceanoService] Couche WMS Désactivée");
         }
     }
 }

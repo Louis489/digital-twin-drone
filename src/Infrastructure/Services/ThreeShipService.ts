@@ -9,6 +9,21 @@ import droneModelUrl from '../../assets/drone.glb?url';
 import shipModelUrl from '../../assets/ship.glb?url';
 import skyExrUrl from '../../assets/sky.exr?url';
 import turbineModelUrl from '../../assets/turbine.glb?url';
+import { PathRecorder } from '../../Domain/Entities/PathRecorder';
+import { ReplayROVMissionUseCase } from '../../Application/UseCases/ReplayROVMission';
+
+interface SerializedROVPath {
+    waypoints: {
+        timestamp: number;
+        position: { x: number; y: number; z: number };
+        rotation: { x: number; y: number; z: number; w: number };
+    }[];
+}
+
+const DEMO_ROV_Y = -50;
+const DEMO_SEABED_Y = -70;
+const DEMO_REEF_CENTER_X = 630;
+const DEMO_REEF_CENTER_Z = -400;
 
 export class ThreeShipService {
     private scene: THREE.Scene;
@@ -39,8 +54,15 @@ private playerCollider = new Capsule(new THREE.Vector3(0, 100.5, 0), new THREE.V
     private keyStates: { [key: string]: boolean } = {};
     private isSimulationActive = false;
     private mouseDownHandler: ((event: MouseEvent) => void) | null = null;
-    private orbitAngle = 0;
-    private turbinePosition = new THREE.Vector3(700, -100, -500);
+    private replayElapsedTime = 0;
+    private pathRecorder = new PathRecorder();
+    private replayROVMission = new ReplayROVMissionUseCase();
+    private replayFrame = {
+        position: new THREE.Vector3(),
+        rotation: new THREE.Quaternion(),
+    };
+    private loadedPathPosition = new THREE.Vector3();
+    private loadedPathRotation = new THREE.Quaternion();
 
     constructor(containerId: string) {
         const container = document.getElementById(containerId);
@@ -107,7 +129,7 @@ this.camera.updateProjectionMatrix(); // Indispensable pour valider le changemen
         this.scene.add(this.water);
 
         // --- CRÉATION DU FOND MARIN ---
-        const seabedGeo = new THREE.PlaneGeometry(3000, 3000, 64, 64);
+        const seabedGeo = new THREE.PlaneGeometry(4200, 4200, 96, 96);
         
         // Déformation procédurale pour simuler des dunes sous-marines
         const pos = seabedGeo.attributes.position;
@@ -115,22 +137,41 @@ this.camera.updateProjectionMatrix(); // Indispensable pour valider le changemen
             const x = pos.getX(i);
             const y = pos.getY(i);
             // Création de collines douces avec des fonctions sinus
-            const z = Math.sin(x * 0.02) * 5 + Math.cos(y * 0.02) * 5; 
+            const z = Math.sin(x * 0.018) * 2.2 + Math.cos(y * 0.018) * 2.2; 
             pos.setZ(i, z);
         }
         seabedGeo.computeVertexNormals(); // Recalcule les ombres
 
+        const seabedTextureLoader = new THREE.TextureLoader();
+        const seabedColorMap = seabedTextureLoader.load('/seabed/textures/coral_gravel_diff_2k.jpg');
+        const seabedNormalMap = seabedTextureLoader.load('/seabed/textures/coral_gravel_nor_gl_2k.jpg');
+        const seabedRoughnessMap = seabedTextureLoader.load('/seabed/textures/coral_gravel_rough_2k.jpg');
+        for (const texture of [seabedColorMap, seabedNormalMap, seabedRoughnessMap]) {
+            texture.wrapS = THREE.RepeatWrapping;
+            texture.wrapT = THREE.RepeatWrapping;
+            texture.repeat.set(90, 90);
+        }
+        seabedColorMap.colorSpace = THREE.SRGBColorSpace;
+
         const seabedMat = new THREE.MeshStandardMaterial({
-            color: 0x041a2f, // Bleu océan très profond (sable sombre)
+            color: 0xffffff, // Bleu océan très profond (sable sombre)
+            map: seabedColorMap,
+            normalMap: seabedNormalMap,
+            roughnessMap: seabedRoughnessMap,
             roughness: 0.9,
             metalness: 0.1,
+            emissive: 0x06242a,
+            emissiveIntensity: 0.5,
             side: THREE.DoubleSide
         });
         
         const seabed = new THREE.Mesh(seabedGeo, seabedMat);
         seabed.rotation.x = -Math.PI / 2; // À plat
-        seabed.position.y = -10; // Profondeur mission -10m
+        seabed.position.y = DEMO_SEABED_Y; // Profondeur mission -10m
+        seabed.position.x = DEMO_REEF_CENTER_X;
+        seabed.position.z = DEMO_REEF_CENTER_Z;
         this.scene.add(seabed);
+        this.createReefDetails(DEMO_SEABED_Y + 1);
 
         // --- AJOUT DE L'INFRASTRUCTURE DE MISSION ---
         const turbineLoader = new GLTFLoader();
@@ -267,16 +308,16 @@ this.camera.updateProjectionMatrix(); // Indispensable pour valider le changemen
                 
             // --- ACTIVER LES PHARES DU ROV ---
             // Un spot puissant qui regarde devant
-            const spotLight = new THREE.SpotLight(0xffffff, 20.0, 100, Math.PI / 4, 0.5, 1);
+            const spotLight = new THREE.SpotLight(0xffffff, 140.0, 320, Math.PI / 2.6, 0.45, 1);
             // On le positionne sur le "nez" (selon l'axe avant de ton modèle)
             spotLight.position.set(0, 0, 1); 
-            spotLight.target.position.set(0, 0, 50); // Regarde droit devant
+            spotLight.target.position.set(0, -8, 60); // Regarde droit devant
                 
             this.drone.add(spotLight);
             this.drone.add(spotLight.target);
             
             // 1. POSITION : Plus loin et plus profond
-            this.drone.position.set(0, -10, -30); 
+            this.drone.position.set(0, DEMO_ROV_Y, -30); 
             
             // 2. ORIENTATION : Rotation pour que l'avant (ne) face l'horizon droit
             // Le ROV se déplace vers +X (horizon droit), donc on le tourne de -90° sur Y
@@ -302,6 +343,7 @@ this.camera.updateProjectionMatrix(); // Indispensable pour valider le changemen
             this.drone.add(this.rovCamera);
 
             this.scene.add(this.drone);
+            void this.loadDemoROVPath();
             console.log("🤖 [ThreeShipService] Drone en position sous-marine !");
         }, undefined, (error) => {
             console.error("❌ Erreur de chargement GLB :", error);
@@ -394,39 +436,170 @@ this.camera.updateProjectionMatrix(); // Indispensable pour valider le changemen
                 }
             });
         }
+        this.updateROVTelemetryUI();
     }
 
     public update() {
         if (!this.drone) return;
-        
-        // Mouvement orbital autour de la turbine
-        this.orbitAngle += 0.02; // Vitesse de rotation augmentée
-        
-        const orbitRadius = 80; // Rayon de l'orbite autour des poteaux
-        const orbitHeight = -150; // Hauteur de l'orbite (plus profonde)
-        
-        // Position circulaire autour de la turbine
-        const targetX = this.turbinePosition.x + Math.cos(this.orbitAngle) * orbitRadius;
-        const targetY = orbitHeight;
-        const targetZ = this.turbinePosition.z + Math.sin(this.orbitAngle) * orbitRadius;
-
-        // LERP vers la position cible
-        const lerpFactor = 0.02;
-        this.drone.position.x += (targetX - this.drone.position.x) * lerpFactor;
-        this.drone.position.y += (targetY - this.drone.position.y) * lerpFactor;
-        this.drone.position.z += (targetZ - this.drone.position.z) * lerpFactor;
-
-        // Le ROV regarde dans sa direction de mouvement (tangentiel au cercle)
-        const tangentAngle = this.orbitAngle + Math.PI / 2; // +90° pour la tangente
-        const lookAtX = this.drone.position.x + Math.cos(tangentAngle);
-        const lookAtY = this.drone.position.y;
-        const lookAtZ = this.drone.position.z + Math.sin(tangentAngle);
-        
-        this.drone.lookAt(lookAtX, lookAtY, lookAtZ);
 
         // Stabilisation absolue (pas de tremblement, le drone reste droit)
         this.drone.rotation.x = 0; 
         this.drone.rotation.z = 0;
+    }
+
+    private async loadDemoROVPath() {
+        try {
+            const response = await fetch(`${import.meta.env.BASE_URL}data/rov-demo-path.json`);
+            if (!response.ok) return;
+
+            const path = await response.json() as SerializedROVPath;
+            this.pathRecorder.clear();
+            if (path.waypoints.length === 0) return;
+
+            for (const waypoint of path.waypoints) {
+                this.loadedPathPosition.set(waypoint.position.x, DEMO_ROV_Y, waypoint.position.z);
+                this.loadedPathRotation.set(waypoint.rotation.x, waypoint.rotation.y, waypoint.rotation.z, waypoint.rotation.w);
+                this.pathRecorder.record(this.loadedPathPosition, this.loadedPathRotation, waypoint.timestamp);
+            }
+
+            const firstWaypoint = path.waypoints[0];
+            if (this.drone) {
+                this.drone.position.set(firstWaypoint.position.x, DEMO_ROV_Y, firstWaypoint.position.z);
+                this.drone.quaternion.set(firstWaypoint.rotation.x, firstWaypoint.rotation.y, firstWaypoint.rotation.z, firstWaypoint.rotation.w);
+            }
+            this.replayElapsedTime = 0;
+        } catch {
+            this.pathRecorder.clear();
+        }
+    }
+
+    private updateReplayROV(deltaTime: number) {
+        if (!this.drone || this.pathRecorder.count < 2) return;
+
+        this.replayElapsedTime += deltaTime;
+        if (this.replayROVMission.execute(this.pathRecorder.getWaypoints(), this.replayElapsedTime, this.replayFrame)) {
+            this.drone.position.copy(this.replayFrame.position);
+            this.drone.quaternion.copy(this.replayFrame.rotation);
+        }
+    }
+
+    private createReefDetails(seabedY: number) {
+        const reefGroup = new THREE.Group();
+        const coralColors = [0xff5f7e, 0xff9f43, 0x9b5de5, 0x00bbf9, 0x80ed99, 0xffd166];
+        const coralGeometries = [
+            new THREE.ConeGeometry(1.4, 5, 7),
+            new THREE.CylinderGeometry(0.35, 0.75, 4, 6),
+            new THREE.IcosahedronGeometry(1.8, 0),
+        ];
+        const rockGeometry = new THREE.DodecahedronGeometry(2.2, 0);
+        const seaweedGeometry = new THREE.CylinderGeometry(0.18, 0.35, 5, 5);
+
+        for (let index = 0; index < 150; index++) {
+            const geometry = coralGeometries[index % coralGeometries.length];
+            const color = coralColors[index % coralColors.length];
+            const material = new THREE.MeshStandardMaterial({
+                color,
+                emissive: color,
+                emissiveIntensity: 0.18,
+                roughness: 0.85,
+                metalness: 0,
+            });
+            const coral = new THREE.Mesh(geometry, material);
+            const angle = index * 2.399963229728653;
+            const radius = 35 + (index % 17) * 24;
+            coral.position.set(
+                DEMO_REEF_CENTER_X + Math.cos(angle) * radius,
+                seabedY,
+                DEMO_REEF_CENTER_Z + Math.sin(angle) * radius,
+            );
+            const scale = 1.1 + (index % 6) * 0.24;
+            coral.scale.set(scale, scale, scale);
+            coral.rotation.y = angle;
+            reefGroup.add(coral);
+        }
+
+        for (let index = 0; index < 70; index++) {
+            const geometry = coralGeometries[index % coralGeometries.length];
+            const color = coralColors[(index + 2) % coralColors.length];
+            const material = new THREE.MeshStandardMaterial({
+                color,
+                emissive: color,
+                emissiveIntensity: 0.35,
+                roughness: 0.8,
+                metalness: 0,
+            });
+            const coral = new THREE.Mesh(geometry, material);
+            const angle = index * 2.19;
+            const radius = 8 + (index % 8) * 8;
+            coral.position.set(
+                150 + Math.cos(angle) * radius,
+                seabedY,
+                27 + Math.sin(angle) * radius,
+            );
+            const scale = 1.5 + (index % 5) * 0.35;
+            coral.scale.set(scale, scale, scale);
+            coral.rotation.y = angle;
+            reefGroup.add(coral);
+        }
+
+        for (let index = 0; index < 45; index++) {
+            const material = new THREE.MeshStandardMaterial({
+                color: 0x3b4a46,
+                roughness: 1,
+                metalness: 0,
+            });
+            const rock = new THREE.Mesh(rockGeometry, material);
+            const angle = index * 2.071;
+            const radius = 50 + (index % 11) * 34;
+            rock.position.set(
+                DEMO_REEF_CENTER_X + Math.cos(angle) * radius,
+                seabedY - 0.2,
+                DEMO_REEF_CENTER_Z + Math.sin(angle) * radius,
+            );
+            const scale = 1.2 + (index % 5) * 0.45;
+            rock.scale.set(scale * 1.4, scale * 0.55, scale);
+            rock.rotation.set(index * 0.31, angle, index * 0.17);
+            reefGroup.add(rock);
+        }
+
+        for (let index = 0; index < 90; index++) {
+            const material = new THREE.MeshStandardMaterial({
+                color: 0x1b8a5a,
+                emissive: 0x0b3d2d,
+                emissiveIntensity: 0.2,
+                roughness: 0.75,
+                metalness: 0,
+            });
+            const seaweed = new THREE.Mesh(seaweedGeometry, material);
+            const angle = index * 2.63;
+            const radius = 45 + (index % 15) * 26;
+            seaweed.position.set(
+                DEMO_REEF_CENTER_X + Math.cos(angle) * radius,
+                seabedY + 2.5,
+                DEMO_REEF_CENTER_Z + Math.sin(angle) * radius,
+            );
+            const scale = 0.8 + (index % 4) * 0.2;
+            seaweed.scale.set(scale, 0.8 + (index % 5) * 0.25, scale);
+            seaweed.rotation.z = Math.sin(index) * 0.22;
+            reefGroup.add(seaweed);
+        }
+
+        this.scene.add(reefGroup);
+    }
+
+    private updateROVTelemetryUI() {
+        if (!this.drone) return;
+
+        const depthElement = document.getElementById('data-depth');
+        const tempElement = document.getElementById('data-temp');
+        const depth = Math.max(0, -this.drone.position.y);
+        if (depthElement) {
+            depthElement.innerText = depth.toFixed(2);
+        }
+        if (tempElement) {
+            const temperature = Math.max(2.5, 12 - depth * 0.025);
+            tempElement.innerText = temperature.toFixed(2);
+        }
     }
 
     private animate() {
@@ -436,11 +609,13 @@ this.camera.updateProjectionMatrix(); // Indispensable pour valider le changemen
         }
         
         const time = performance.now();
+        let delta = (time - this.prevTime) / 1000;
+        if (delta > 0.1) delta = 0.1;
+        this.updateReplayROV(delta);
+        this.updateROVTelemetryUI();
+
         if (this.controls && this.controls.isLocked === true) {
             // Limitation du delta pour éviter les sauts physiques
-            let delta = (time - this.prevTime) / 1000;
-            if (delta > 0.1) delta = 0.1;
-            
             // Mise à jour physique FPS Octree
             this.updatePlayer(delta);
         }

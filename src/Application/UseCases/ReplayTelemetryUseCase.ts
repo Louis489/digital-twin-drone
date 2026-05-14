@@ -66,8 +66,6 @@ export class ReplayTelemetryUseCase {
       setTimeout(() => {
         this.animationId = requestAnimationFrame(() => this.update());
       }, clampedDelay);
-    } else {
-      console.log('Telemetry replay completed');
     }
   }
 }
