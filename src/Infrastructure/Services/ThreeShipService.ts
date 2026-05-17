@@ -110,8 +110,8 @@ this.camera.updateProjectionMatrix(); // Indispensable pour valider le changemen
         this.renderer.outputColorSpace = THREE.SRGBColorSpace;
         this.renderer.xr.enabled = true;
         container.appendChild(this.renderer.domElement);
-        this.xrDolly.position.copy(PLAYER_SPAWN_POSITION);
         this.scene.add(this.xrDolly);
+        this.xrDolly.add(this.camera);
 
         // --- LUMIÈRES JOURNÉE ---
         // Lumière ambiante douce
@@ -273,8 +273,8 @@ this.camera.updateProjectionMatrix(); // Indispensable pour valider le changemen
         // 4. Contrôles FPS (PointerLockControls)
         this.camera.position.copy(this.playerCollider.end);
         this.camera.lookAt(PLAYER_LOOK_AT_POSITION);
+        this.xrDolly.position.set(0, 0, 0);
         this.controls = new PointerLockControls(this.camera, document.body);
-        this.scene.add(this.controls.getObject());
 
         // Correction "Pro" du PointerLock - désactivé par défaut
         const startControls = () => {
@@ -472,7 +472,6 @@ this.camera.updateProjectionMatrix(); // Indispensable pour valider le changemen
         this.deactivateSimulation();
         this.xrDolly.position.copy(PLAYER_SPAWN_POSITION);
         this.camera.position.set(0, PLAYER_EYE_HEIGHT, 0);
-        this.xrDolly.add(this.camera);
 
         const session = await navigator.xr.requestSession('immersive-ar', {
             requiredFeatures: ['local-floor'],
@@ -655,7 +654,7 @@ this.camera.updateProjectionMatrix(); // Indispensable pour valider le changemen
         this.updateReplayROV(delta);
         this.updateROVTelemetryUI();
 
-        if (this.controls && this.controls.isLocked === true) {
+        if (!this.renderer.xr.isPresenting && this.controls && this.controls.isLocked === true) {
             // Limitation du delta pour éviter les sauts physiques
             // Mise à jour physique FPS Octree
             this.updatePlayer(delta);
