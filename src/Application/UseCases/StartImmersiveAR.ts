@@ -1,9 +1,9 @@
 import type { IXRService } from '../../Domain/Interfaces/IXRService';
 
-export class ToggleARVisionUseCase {
+export class StartImmersiveARUseCase {
     constructor(private xrService: IXRService) {}
 
-    public execute(isActive: boolean): void {
-        this.xrService.toggleARMode(isActive);
+    public execute(): Promise<void> {
+        return this.xrService.startImmersiveAR();
     }
 }

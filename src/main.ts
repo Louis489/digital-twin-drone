@@ -1,6 +1,6 @@
 import { DroneScene, GlobeScene } from './Presentation';
 import { Drone } from './Domain';
-import { ReplayTelemetryUseCase, ToggleBathymetryUseCase, StartMissionUseCase, ToggleARVisionUseCase } from './Application';
+import { ReplayTelemetryUseCase, ToggleBathymetryUseCase, StartMissionUseCase, ToggleARVisionUseCase, StartImmersiveARUseCase } from './Application';
 import { TelemetryService, CesiumOceanoService } from './Infrastructure';
 import { ThreeShipService } from './Infrastructure/Services/ThreeShipService';
 
@@ -137,8 +137,10 @@ async function init(): Promise<void> {
   
   // Câblage du bouton AR (Vision X-Ray)
   const toggleARUseCase = new ToggleARVisionUseCase(threeShipService);
+  const startImmersiveARUseCase = new StartImmersiveARUseCase(threeShipService);
   let isAROn = false;
   const arBtn = document.getElementById('btn-ar-toggle');
+  const enterARBtn = document.getElementById('btn-enter-ar') as HTMLButtonElement | null;
   
   // Fonction pour toggle AR
   const toggleAR = () => {
@@ -161,6 +163,25 @@ async function init(): Promise<void> {
           // Évite que le clic verrouille la caméra quand on clique sur le bouton
           e.stopPropagation(); 
           toggleAR();
+      });
+  }
+
+  if (enterARBtn && navigator.xr) {
+      navigator.xr.isSessionSupported('immersive-ar')
+          .then((isSupported) => {
+              enterARBtn.style.display = isSupported ? 'block' : 'none';
+          })
+          .catch(() => {
+              enterARBtn.style.display = 'none';
+          });
+
+      enterARBtn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          try {
+              await startImmersiveARUseCase.execute();
+          } catch (error) {
+              console.error("❌ Impossible de démarrer la session WebXR immersive-ar :", error);
+          }
       });
   }
   

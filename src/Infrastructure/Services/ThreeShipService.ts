@@ -11,6 +11,7 @@ import skyExrUrl from '../../assets/sky.exr?url';
 import turbineModelUrl from '../../assets/turbine.glb?url';
 import { PathRecorder } from '../../Domain/Entities/PathRecorder';
 import { ReplayROVMissionUseCase } from '../../Application/UseCases/ReplayROVMission';
+import type { IXRService } from '../../Domain/Interfaces/IXRService';
 
 interface SerializedROVPath {
     waypoints: {
@@ -25,7 +26,7 @@ const DEMO_SEABED_Y = -70;
 const DEMO_REEF_CENTER_X = 630;
 const DEMO_REEF_CENTER_Z = -400;
 
-export class ThreeShipService {
+export class ThreeShipService implements IXRService {
     private scene: THREE.Scene;
     private camera: THREE.PerspectiveCamera;
     private renderer: THREE.WebGLRenderer;
@@ -63,6 +64,7 @@ private playerCollider = new Capsule(new THREE.Vector3(0, 100.5, 0), new THREE.V
     };
     private loadedPathPosition = new THREE.Vector3();
     private loadedPathRotation = new THREE.Quaternion();
+    private xrDolly = new THREE.Group();
 
     constructor(containerId: string) {
         const container = document.getElementById(containerId);
@@ -97,7 +99,10 @@ this.camera.updateProjectionMatrix(); // Indispensable pour valider le changemen
         this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
         this.renderer.toneMappingExposure = 0.4; // Ciel plus éloigné et moins lumineux
         this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+        this.renderer.xr.enabled = true;
         container.appendChild(this.renderer.domElement);
+        this.xrDolly.position.set(0, 0, 0);
+        this.scene.add(this.xrDolly);
 
         // --- LUMIÈRES JOURNÉE ---
         // Lumière ambiante douce
@@ -300,7 +305,7 @@ this.camera.updateProjectionMatrix(); // Indispensable pour valider le changemen
         this.loadDrone();
 
         this.animate = this.animate.bind(this);
-        this.animate();
+        this.renderer.setAnimationLoop(this.animate);
     }
 
     private loadDrone() {
@@ -442,6 +447,28 @@ this.camera.updateProjectionMatrix(); // Indispensable pour valider le changemen
             });
         }
         this.updateROVTelemetryUI();
+    }
+
+    public async startImmersiveAR(): Promise<void> {
+        if (!navigator.xr) {
+            throw new Error('WebXR indisponible sur ce navigateur.');
+        }
+
+        const isSupported = await navigator.xr.isSessionSupported('immersive-ar');
+        if (!isSupported) {
+            throw new Error("Le mode WebXR immersive-ar n'est pas supporté sur cet appareil.");
+        }
+
+        this.deactivateSimulation();
+        this.xrDolly.position.set(0, 0, 0);
+        this.camera.position.set(0, 0, 0);
+        this.xrDolly.add(this.camera);
+
+        const session = await navigator.xr.requestSession('immersive-ar', {
+            requiredFeatures: ['local-floor'],
+        });
+
+        await this.renderer.xr.setSession(session);
     }
 
     public update() {
@@ -608,7 +635,6 @@ this.camera.updateProjectionMatrix(); // Indispensable pour valider le changemen
     }
 
     private animate() {
-        requestAnimationFrame(this.animate);
         if (this.water) {
             this.water.material.uniforms['time'].value += 1.0 / 60.0;
         }

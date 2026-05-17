@@ -11,3 +11,4 @@ export {
 } from './Entities/InspectionMission';
 export { PathRecorder, type RecordedQuaternion, type RecordedVector3, type ROVWaypoint } from './Entities/PathRecorder';
 export type { IOceanoService } from './Interfaces/IOceanoService';
+export type { IXRService } from './Interfaces/IXRService';
