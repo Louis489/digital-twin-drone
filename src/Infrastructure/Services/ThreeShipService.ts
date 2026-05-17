@@ -25,7 +25,10 @@ const DEMO_ROV_Y = -50;
 const DEMO_SEABED_Y = -70;
 const DEMO_REEF_CENTER_X = 630;
 const DEMO_REEF_CENTER_Z = -400;
-const SHIP_DECK_Y = 3.5;
+const PLAYER_SPAWN_Y = 125;
+const PLAYER_EYE_HEIGHT = 40;
+const PLAYER_SPAWN_POSITION = new THREE.Vector3(0, PLAYER_SPAWN_Y, 5);
+const PLAYER_LOOK_AT_POSITION = new THREE.Vector3(700, -55, -500);
 
 export class ThreeShipService implements IXRService {
     private scene: THREE.Scene;
@@ -49,7 +52,12 @@ export class ThreeShipService implements IXRService {
     
     // Physique FPS Octree
     private worldOctree = new Octree();
-private playerCollider = new Capsule(new THREE.Vector3(0, 100.5, 0), new THREE.Vector3(0, 150.5, 0), 0.5);    private playerVelocity = new THREE.Vector3();
+    private playerCollider = new Capsule(
+        new THREE.Vector3(PLAYER_SPAWN_POSITION.x, PLAYER_SPAWN_POSITION.y, PLAYER_SPAWN_POSITION.z),
+        new THREE.Vector3(PLAYER_SPAWN_POSITION.x, PLAYER_SPAWN_POSITION.y + PLAYER_EYE_HEIGHT, PLAYER_SPAWN_POSITION.z),
+        0.5
+    );
+    private playerVelocity = new THREE.Vector3();
     private playerDirection = new THREE.Vector3();
     private playerOnFloor = false;
     private gravity = 100;
@@ -102,7 +110,7 @@ this.camera.updateProjectionMatrix(); // Indispensable pour valider le changemen
         this.renderer.outputColorSpace = THREE.SRGBColorSpace;
         this.renderer.xr.enabled = true;
         container.appendChild(this.renderer.domElement);
-        this.xrDolly.position.set(0, SHIP_DECK_Y, 0);
+        this.xrDolly.position.copy(PLAYER_SPAWN_POSITION);
         this.scene.add(this.xrDolly);
 
         // --- LUMIÈRES JOURNÉE ---
@@ -263,7 +271,8 @@ this.camera.updateProjectionMatrix(); // Indispensable pour valider le changemen
         );
 
         // 4. Contrôles FPS (PointerLockControls)
-        this.camera.position.set(0, 3.5, 5); // Hauteur des yeux (pont à Y=2 + 1.5m)
+        this.camera.position.copy(this.playerCollider.end);
+        this.camera.lookAt(PLAYER_LOOK_AT_POSITION);
         this.controls = new PointerLockControls(this.camera, document.body);
         this.scene.add(this.controls.getObject());
 
@@ -461,8 +470,8 @@ this.camera.updateProjectionMatrix(); // Indispensable pour valider le changemen
         }
 
         this.deactivateSimulation();
-        this.xrDolly.position.set(0, SHIP_DECK_Y, 0);
-        this.camera.position.set(0, 0, 0);
+        this.xrDolly.position.copy(PLAYER_SPAWN_POSITION);
+        this.camera.position.set(0, PLAYER_EYE_HEIGHT, 0);
         this.xrDolly.add(this.camera);
 
         const session = await navigator.xr.requestSession('immersive-ar', {
