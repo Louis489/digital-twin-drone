@@ -25,6 +25,7 @@ const DEMO_ROV_Y = -50;
 const DEMO_SEABED_Y = -70;
 const DEMO_REEF_CENTER_X = 630;
 const DEMO_REEF_CENTER_Z = -400;
+const SHIP_DECK_Y = 3.5;
 
 export class ThreeShipService implements IXRService {
     private scene: THREE.Scene;
@@ -101,7 +102,7 @@ this.camera.updateProjectionMatrix(); // Indispensable pour valider le changemen
         this.renderer.outputColorSpace = THREE.SRGBColorSpace;
         this.renderer.xr.enabled = true;
         container.appendChild(this.renderer.domElement);
-        this.xrDolly.position.set(0, 0, 0);
+        this.xrDolly.position.set(0, SHIP_DECK_Y, 0);
         this.scene.add(this.xrDolly);
 
         // --- LUMIÈRES JOURNÉE ---
@@ -460,7 +461,7 @@ this.camera.updateProjectionMatrix(); // Indispensable pour valider le changemen
         }
 
         this.deactivateSimulation();
-        this.xrDolly.position.set(0, 0, 0);
+        this.xrDolly.position.set(0, SHIP_DECK_Y, 0);
         this.camera.position.set(0, 0, 0);
         this.xrDolly.add(this.camera);
 
