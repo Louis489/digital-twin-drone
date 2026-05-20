@@ -1,7 +1,9 @@
 import { DroneScene, GlobeScene } from './Presentation';
-import { Drone } from './Domain';
-import { ReplayTelemetryUseCase, ToggleBathymetryUseCase, StartMissionUseCase, ToggleARVisionUseCase, StartImmersiveARUseCase } from './Application';
-import { TelemetryService, CesiumOceanoService } from './Infrastructure';
+import { Drone, WeatherLayerType } from './Domain';
+import { ReplayTelemetryUseCase, ToggleBathymetryUseCase, StartMissionUseCase, ToggleARVisionUseCase, StartImmersiveARUseCase, ManageShipTrafficUseCase } from './Application';
+import { TelemetryService, CesiumOceanoService, AISStreamWebSocketService, CesiumWeatherService } from './Infrastructure';
+import type { Ship } from './Domain';
+import { LodLevel } from './Domain';
 import { ThreeShipService } from './Infrastructure/Services/ThreeShipService';
 
 const cesiumContainer = document.getElementById('cesium-container');
@@ -83,6 +85,26 @@ function setupBathymetryUI(): void {
   }
 }
 
+function setupWeatherLayersUI(weatherService: CesiumWeatherService): void {
+  const weatherLayerInputs = document.querySelectorAll<HTMLInputElement>('input[name="weather-layer"]');
+  const weatherLayerByInputValue: Record<string, WeatherLayerType> = {
+    wind: WeatherLayerType.Wind,
+    temperature: WeatherLayerType.Temperature,
+    'cloud-cover': WeatherLayerType.CloudCover,
+    rain: WeatherLayerType.Rain,
+    pressure: WeatherLayerType.Pressure,
+  };
+
+  weatherLayerInputs.forEach((input) => {
+    input.checked = false;
+    input.addEventListener('change', () => {
+      const selectedLayer = input.checked ? weatherLayerByInputValue[input.value] ?? WeatherLayerType.None : WeatherLayerType.None;
+      weatherService.setActiveLayer(selectedLayer);
+      console.info('[Weather] Couche météo sélectionnée :', selectedLayer);
+    });
+  });
+}
+
 async function loadGlobeScene(): Promise<void> {
   if (!cesiumContainer) return;
 
@@ -106,10 +128,74 @@ async function loadGlobeScene(): Promise<void> {
     // Initialisation de l'Infrastructure (Services connectés à Cesium)
     const viewer = scene.getViewer();
     oceanoService = new CesiumOceanoService(viewer);
+    const currentOceanoService = oceanoService;
+    const weatherService = new CesiumWeatherService(viewer);
 
     // Initialisation de l'Application (Cas d'Usage)
     toggleBathyUseCase = new ToggleBathymetryUseCase(oceanoService);
     const startMissionUseCase = new StartMissionUseCase();
+
+    // ─── AIS temps réel (ManageShipTrafficUseCase) ───
+    const aisRepository = new AISStreamWebSocketService();
+    const manageShipTraffic = new ManageShipTrafficUseCase(aisRepository);
+
+    const shipCountEl = document.getElementById('ship-count');
+    const lodLevelEl = document.getElementById('lod-level');
+    const aisStatusDot = document.getElementById('ais-status-dot');
+    const aisStatusText = document.getElementById('ais-status-text');
+    const aisApiKeyInput = document.getElementById('ais-api-key') as HTMLInputElement | null;
+    const aisTrafficCheckbox = document.getElementById('toggle-ais-traffic') as HTMLInputElement | null;
+    const shipColorLegend = document.getElementById('ship-color-legend');
+
+    // Écoute de la hauteur caméra → LOD
+    oceanoService.onCameraHeightChange((height: number) => {
+      manageShipTraffic.updateCameraHeight(height);
+      if (lodLevelEl) {
+        lodLevelEl.innerText = manageShipTraffic.getCurrentLodLevel();
+      }
+    });
+
+    // Toggle de connexion AIS
+    if (aisTrafficCheckbox && aisApiKeyInput) {
+      aisTrafficCheckbox.addEventListener('change', () => {
+        if (!aisTrafficCheckbox.checked) {
+          manageShipTraffic.stop();
+          currentOceanoService.clearShipTraffic();
+          if (aisStatusDot) aisStatusDot.style.background = '#ff4444';
+          if (aisStatusText) aisStatusText.innerText = 'Déconnecté';
+          if (shipCountEl) shipCountEl.innerText = '0';
+          if (shipColorLegend) shipColorLegend.style.display = 'none';
+          return;
+        }
+
+        const apiKey = aisApiKeyInput.value.trim();
+        if (!apiKey) {
+          console.warn('⚠️ Veuillez entrer une clé API AISStream.');
+          aisTrafficCheckbox.checked = false;
+          return;
+        }
+
+        manageShipTraffic.start(
+          apiKey,
+          (ships: Map<string, Ship>, lodLevel: LodLevel) => {
+            currentOceanoService.renderShipTraffic(ships, lodLevel);
+          },
+          (count: number) => {
+            if (shipCountEl) shipCountEl.innerText = count.toString();
+          },
+        ).then(() => {
+          if (aisStatusDot) aisStatusDot.style.background = '#44ff44';
+          if (aisStatusText) aisStatusText.innerText = 'Connecté';
+          if (shipColorLegend) shipColorLegend.style.display = 'grid';
+        }).catch((err: unknown) => {
+          console.error('❌ Connexion AISStream échouée :', err);
+          if (aisStatusDot) aisStatusDot.style.background = '#ff4444';
+          if (aisStatusText) aisStatusText.innerText = 'Erreur';
+          aisTrafficCheckbox.checked = false;
+          if (shipColorLegend) shipColorLegend.style.display = 'none';
+        });
+      });
+    }
 
     // Connexion du clic Cesium vers le UseCase de transition
     scene.onMarkerClick(async () => {
@@ -124,6 +210,7 @@ async function loadGlobeScene(): Promise<void> {
 
     // Configuration UI
     setupBathymetryUI();
+    setupWeatherLayersUI(weatherService);
   } catch (err) {
     console.error('Failed to initialize globe:', err);
   }

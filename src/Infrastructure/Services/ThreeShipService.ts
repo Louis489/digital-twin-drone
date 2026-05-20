@@ -13,6 +13,7 @@ import { PathRecorder } from '../../Domain/Entities/PathRecorder';
 import { ReplayROVMissionUseCase } from '../../Application/UseCases/ReplayROVMission';
 import type { IXRService } from '../../Domain/Interfaces/IXRService';
 
+
 interface SerializedROVPath {
     waypoints: {
         timestamp: number;
@@ -26,7 +27,7 @@ const DEMO_SEABED_Y = -70;
 const DEMO_REEF_CENTER_X = 630;
 const DEMO_REEF_CENTER_Z = -400;
 const PLAYER_SPAWN_Y = 125;
-const PLAYER_EYE_HEIGHT = 40;
+const PLAYER_EYE_HEIGHT = 50;
 const PLAYER_SPAWN_POSITION = new THREE.Vector3(0, PLAYER_SPAWN_Y, 5);
 const PLAYER_LOOK_AT_POSITION = new THREE.Vector3(700, -55, -500);
 
@@ -74,6 +75,21 @@ export class ThreeShipService implements IXRService {
     private loadedPathPosition = new THREE.Vector3();
     private loadedPathRotation = new THREE.Quaternion();
     private xrDolly = new THREE.Group();
+    private vesselFrame = new THREE.Group();
+    private isXRSessionActive = false;
+    private isXRSessionStarting = false;
+    private isVRStarting = false;
+    private controller1?: THREE.Group;
+    private controller2?: THREE.Group;
+    private teleportMarker?: THREE.Mesh;
+    private teleportRaycaster = new THREE.Raycaster();
+    private activeTeleportController: THREE.Group | null = null;
+    private teleportTargetVector = new THREE.Vector3();
+    private isTeleportTargetValid = false;
+    private isARModeVRActive = false;
+    private menuButtonWasPressed = false;
+    private rovRenderTarget!: THREE.WebGLRenderTarget;
+    private vrMonitorMesh?: THREE.Mesh;
 
     constructor(containerId: string) {
         const container = document.getElementById(containerId);
@@ -109,8 +125,21 @@ this.camera.updateProjectionMatrix(); // Indispensable pour valider le changemen
         this.renderer.toneMappingExposure = 0.4; // Ciel plus éloigné et moins lumineux
         this.renderer.outputColorSpace = THREE.SRGBColorSpace;
         this.renderer.xr.enabled = true;
+        this.renderer.xr.setReferenceSpaceType('local');
         container.appendChild(this.renderer.domElement);
-        this.scene.add(this.xrDolly);
+
+        // Initialisation du marqueur de téléportation (anneau vert)
+        const ringGeo = new THREE.RingGeometry(0.3, 0.4, 32);
+        ringGeo.rotateX(-Math.PI / 2);
+        const ringMat = new THREE.MeshBasicMaterial({ color: 0x00ff00, side: THREE.DoubleSide });
+        this.teleportMarker = new THREE.Mesh(ringGeo, ringMat);
+        this.teleportMarker.visible = false;
+        this.scene.add(this.teleportMarker);
+
+        this.setupXRSessionEvents();
+        this.setupVRControllers();
+        this.scene.add(this.vesselFrame);
+        this.vesselFrame.add(this.xrDolly);
         this.xrDolly.add(this.camera);
 
         // --- LUMIÈRES JOURNÉE ---
@@ -250,7 +279,7 @@ this.camera.updateProjectionMatrix(); // Indispensable pour valider le changemen
                     }
                 });
 
-                this.scene.add(this.shipModel);
+                this.vesselFrame.add(this.shipModel);
                 console.log("🚢 [DEBUG SHIP] Bateau ajouté à la scène 3D !");
                 
                 // On donne le modèle à l'Octree pour générer les collisions
@@ -271,13 +300,16 @@ this.camera.updateProjectionMatrix(); // Indispensable pour valider le changemen
         );
 
         // 4. Contrôles FPS (PointerLockControls)
-        this.camera.position.copy(this.playerCollider.end);
+        this.syncCameraWithPlayerCollider();
         this.camera.lookAt(PLAYER_LOOK_AT_POSITION);
-        this.xrDolly.position.set(0, 0, 0);
+        this.xrDolly.position.copy(PLAYER_SPAWN_POSITION);
         this.controls = new PointerLockControls(this.camera, document.body);
 
         // Correction "Pro" du PointerLock - désactivé par défaut
         const startControls = () => {
+            if (this.isXRSessionActive || this.renderer.xr.isPresenting) {
+                return;
+            }
             if (this.controls && !this.controls.isLocked && this.isSimulationActive && document.pointerLockElement === null) {
                 try {
                     this.controls.lock();
@@ -305,7 +337,52 @@ this.camera.updateProjectionMatrix(); // Indispensable pour valider le changemen
         });
 
         // Écouteurs Clavier (système Octree)
-        document.addEventListener('keydown', (event) => { this.keyStates[event.code] = true; });
+        document.addEventListener('keydown', (event) => {
+            this.keyStates[event.code] = true;
+            if (event.key.toLowerCase() === 'v') {
+                // 1. Anti-spam absolu : on ignore si la touche est maintenue ou si la VR demarre deja
+                if (event.repeat || this.isVRStarting) return;
+
+                if (navigator.xr && !this.renderer.xr.isPresenting) {
+                    this.isVRStarting = true; // On verrouille
+
+                    // 2. On libere la souris tout de suite
+                    if (this.controls && this.controls.isLocked) {
+                        this.controls.unlock();
+                    }
+
+                    // 3. On demande la session directement (Three.js gerera le makeXRCompatible en interne)
+                    navigator.xr.requestSession('immersive-vr').then((session: XRSession) => {
+                        // Fonction recursive pour retenter le coup si la carte graphique redemarre
+                        const trySetSession = async (retries = 10) => {
+                            try {
+                                await this.renderer.xr.setSession(session);
+                                console.log("VR Session lancee avec succes !");
+                                this.isVRStarting = false; // On deverrouille seulement quand c'est un succes
+                            } catch (error) {
+                                if (retries > 0) {
+                                    console.warn(`Le GPU bascule sur SteamVR, on patiente... (Essais restants: ${retries})`);
+                                    // On attend 500ms que le contexte WebGL se restaure avant de reessayer
+                                    setTimeout(() => trySetSession(retries - 1), 500);
+                                } else {
+                                    console.error('Erreur fatale setSession (Timeout) :', error);
+                                    this.isVRStarting = false;
+                                }
+                            }
+                        };
+
+                        trySetSession();
+
+                    }).catch((error: unknown) => {
+                        console.error('Erreur requestSession :', error);
+                        this.isVRStarting = false;
+                    });
+                } else if (navigator.xr && this.renderer.xr.isPresenting) {
+                    // Bonus : Appuyer sur V en VR permet de quitter proprement
+                    this.renderer.xr.getSession()?.end();
+                }
+            }
+        });
         document.addEventListener('keyup', (event) => { this.keyStates[event.code] = false; });
 
         // Redimensionnement
@@ -478,6 +555,101 @@ this.camera.updateProjectionMatrix(); // Indispensable pour valider le changemen
         });
 
         await this.renderer.xr.setSession(session);
+    }
+
+    public async startImmersiveVR(): Promise<void> {
+        if (this.isXRSessionActive || this.isXRSessionStarting || this.renderer.xr.isPresenting) {
+            return;
+        }
+
+        if (!navigator.xr) {
+            console.error('WebXR indisponible sur ce navigateur.');
+            return;
+        }
+
+        this.isXRSessionStarting = true;
+        this.deactivateSimulation();
+        if (this.controls?.isLocked) {
+            this.controls.unlock();
+        }
+        this.keyStates = {};
+        this.xrDolly.position.copy(PLAYER_SPAWN_POSITION);
+        // On surélève le Dolly pour compenser l'espace 'local' de WebXR
+        this.xrDolly.position.y += PLAYER_EYE_HEIGHT;
+        this.camera.position.set(0, PLAYER_EYE_HEIGHT, 0);
+
+        try {
+            const session = await navigator.xr.requestSession('immersive-vr');
+            await this.renderer.xr.setSession(session);
+        } catch (error) {
+            this.isXRSessionStarting = false;
+            console.error("Erreur lancement VR:", error);
+        }
+    }
+
+    private setupXRSessionEvents(): void {
+        this.renderer.xr.addEventListener('sessionstart', () => {
+            this.isXRSessionStarting = false;
+            this.isXRSessionActive = true;
+            this.deactivateSimulation();
+            this.keyStates = {};
+            if (this.controls?.isLocked) {
+                this.controls.unlock();
+            }
+        });
+
+        this.renderer.xr.addEventListener('sessionend', () => {
+            this.isXRSessionStarting = false;
+            this.isXRSessionActive = false;
+            this.keyStates = {};
+            this.xrDolly.position.copy(PLAYER_SPAWN_POSITION);
+            // On surélève le Dolly pour compenser l'espace 'local' de WebXR
+            this.xrDolly.position.y += PLAYER_EYE_HEIGHT;
+            this.camera.position.set(0, PLAYER_EYE_HEIGHT, 0);
+            this.playerVelocity.set(0, 0, 0);
+        });
+    }
+
+    private setupVRControllers() {
+        // Création d'un rayon visuel (laser blanc de 1 mètre)
+        const geometry = new THREE.BufferGeometry().setFromPoints([
+            new THREE.Vector3(0, 0, 0),
+            new THREE.Vector3(0, 0, -1)
+        ]);
+        const material = new THREE.LineBasicMaterial({ color: 0xffffff });
+
+        // Création de la cible de rendu pour le flux vidéo du ROV (Résolution 512x512)
+        this.rovRenderTarget = new THREE.WebGLRenderTarget(512, 512);
+
+        // Création de l'écran physique (Mesh)
+        const monitorGeo = new THREE.PlaneGeometry(0.4, 0.3); // Taille : 40cm x 30cm
+        const monitorMat = new THREE.MeshBasicMaterial({
+            map: this.rovRenderTarget.texture,
+            side: THREE.DoubleSide
+        });
+        this.vrMonitorMesh = new THREE.Mesh(monitorGeo, monitorMat);
+
+        // Positionnement au-dessus du poignet
+        this.vrMonitorMesh.position.set(0, 0.15, -0.1);
+        this.vrMonitorMesh.rotation.x = -Math.PI / 4; // Incliné vers les yeux
+        this.vrMonitorMesh.visible = false; // Caché par défaut
+
+        // Contrôleur 1
+        this.controller1 = this.renderer.xr.getController(0);
+        this.controller1.addEventListener('connected', (event: any) => {
+            if (this.controller1) this.controller1.userData.inputSource = event.data;
+        });
+        this.controller1.add(new THREE.Line(geometry, material));
+        this.xrDolly.add(this.controller1);
+
+        // Contrôleur 2
+        this.controller2 = this.renderer.xr.getController(1);
+        this.controller2.addEventListener('connected', (event: any) => {
+            if (this.controller2) this.controller2.userData.inputSource = event.data;
+        });
+        this.controller2.add(new THREE.Line(geometry, material));
+        this.controller2.add(this.vrMonitorMesh);
+        this.xrDolly.add(this.controller2);
     }
 
     public update() {
@@ -654,47 +826,168 @@ this.camera.updateProjectionMatrix(); // Indispensable pour valider le changemen
         this.updateReplayROV(delta);
         this.updateROVTelemetryUI();
 
-        if (!this.renderer.xr.isPresenting && this.controls && this.controls.isLocked === true) {
-            // Limitation du delta pour éviter les sauts physiques
-            // Mise à jour physique FPS Octree
-            this.updatePlayer(delta);
+        if (!this.renderer.xr.isPresenting) {
+            if (this.controls && this.controls.isLocked === true) {
+                // Limitation du delta pour éviter les sauts physiques
+                // Mise à jour physique FPS Octree
+                this.updatePlayer(delta);
+            }
         }
 
         // 1. Nettoyage
         this.renderer.clear();
 
-        // 2. RENDU CAMÉRA PRINCIPALE (Joueur)
-        this.setAtmosphereForHeight(this.camera.position.y);
-        this.renderer.setViewport(0, 0, window.innerWidth, window.innerHeight);
-        this.renderer.setScissor(0, 0, window.innerWidth, window.innerHeight);
-        this.renderer.setScissorTest(true);
+        // CORRECTION CIEL : En VR, la caméra locale reste à 0, il faut sa vraie position dans le monde
+        const headWorldPos = new THREE.Vector3();
+        this.camera.getWorldPosition(headWorldPos);
+        this.setAtmosphereForHeight(headWorldPos.y);
+
+        // CORRECTION OEIL GAUCHE : On interdit au code de forcer un écran unique en VR
+        if (!this.renderer.xr.isPresenting) {
+            this.renderer.setViewport(0, 0, window.innerWidth, window.innerHeight);
+            this.renderer.setScissor(0, 0, window.innerWidth, window.innerHeight);
+            this.renderer.setScissorTest(true);
+        }
+
+        // 2. RENDU CAMÉRA PRINCIPALE
         this.renderer.render(this.scene, this.camera);
 
-        // 3. RENDU CAMÉRA SECONDAIRE (ROV HUD)
-        const hud = document.getElementById('rov-video-hud');
-        if (hud && hud.style.display !== 'none' && this.rovCamera) {
-            this.renderer.clearDepth();
-            
-            // On récupère la vraie position absolue du drone dans le monde
+        // --- 3. LOGIQUE DES MANETTES VR (Doit être exécutée APRÈS le rendu) ---
+        if (this.renderer.xr.isPresenting) {
+            const session = this.renderer.xr.getSession();
+            const inputSources = session ? Array.from(session.inputSources) : [];
+            let anyMenuPressed = false;
+
+            [this.controller1, this.controller2].forEach((controller, index) => {
+                if (!controller) return;
+                
+                const inputSource = controller.userData.inputSource || inputSources[index];
+                if (!inputSource || !inputSource.gamepad) return;
+
+                // MAPPING HTC VIVE STANDARD
+                const trigger = inputSource.gamepad.buttons[0];  // Gâchette
+                const grip = inputSource.gamepad.buttons[1];     // Boutons latéraux (Grip)
+                const touchpad = inputSource.gamepad.buttons[2]; // Gros pavé tactile
+                const menuBtn = inputSource.gamepad.buttons[3];  // Petit bouton du haut
+
+                // Détection de l'appui pour la TÉLÉPORTATION (Touchpad ou Gâchette)
+                const isXRPressed = (touchpad && touchpad.pressed) || (trigger && trigger.pressed);
+
+                // Détection de l'appui pour le MODE AR (Bouton Menu OU Bouton Grip latéral)
+                const isARPressed = (menuBtn && menuBtn.pressed) || (grip && grip.pressed);
+                if (isARPressed) {
+                    anyMenuPressed = true;
+                }
+
+                if (isXRPressed) {
+                    this.activeTeleportController = controller;
+                    
+                    const tempMatrix = new THREE.Matrix4();
+                    tempMatrix.extractRotation(controller.matrixWorld);
+                    const direction = new THREE.Vector3(0, 0, -1).applyMatrix4(tempMatrix).normalize();
+                    
+                    const laserOrigin = new THREE.Vector3();
+                    controller.getWorldPosition(laserOrigin);
+                    this.teleportRaycaster.set(laserOrigin, direction);
+                    
+                    if (this.shipModel) {
+                        const intersects = this.teleportRaycaster.intersectObject(this.shipModel, true);
+                        if (intersects.length > 0) {
+                            const hitPoint = intersects[0].point;
+                            this.teleportTargetVector.copy(hitPoint);
+                            
+                            if (this.teleportMarker) {
+                                this.teleportMarker.position.copy(hitPoint);
+                                this.teleportMarker.position.y += 0.05;
+                                this.teleportMarker.visible = true;
+                            }
+                            this.isTeleportTargetValid = true;
+                        } else {
+                            if (this.teleportMarker) this.teleportMarker.visible = false;
+                            this.isTeleportTargetValid = false;
+                        }
+                    }
+                } else if (this.activeTeleportController === controller && !isXRPressed) {
+                    // Relâchement : Exécution de la Téléportation + Compensation hauteur yeux
+                    if (this.isTeleportTargetValid) {
+                        this.xrDolly.position.copy(this.teleportTargetVector);
+                        this.xrDolly.position.y += PLAYER_EYE_HEIGHT;
+                    }
+                    if (this.teleportMarker) this.teleportMarker.visible = false;
+                    this.activeTeleportController = null;
+                    this.isTeleportTargetValid = false;
+                }
+            });
+
+            // Gestion de la bascule AR (Toggle) avec verrou anti-spam (Latch)
+            if (anyMenuPressed) {
+                if (!this.menuButtonWasPressed) {
+                    this.isARModeVRActive = !this.isARModeVRActive;
+                    this.toggleARMode(this.isARModeVRActive);
+                    console.log(`[VR] Mode AR basculé via manette : ${this.isARModeVRActive}`);
+                    this.menuButtonWasPressed = true;
+                }
+            } else {
+                // On réarme le verrou dès que TOUS les boutons de commande AR sont relâchés
+                this.menuButtonWasPressed = false;
+            }
+        }
+
+        // --- 3. RENDU CAMÉRA SECONDAIRE (ROV HUD) ---
+        // Si la caméra ROV est active (Mode AR On)
+        if (this.rovCamera && this.isARModeVRActive) {
             const rovWorldPos = new THREE.Vector3();
             this.rovCamera.getWorldPosition(rovWorldPos);
-            
-            // ON CHANGE L'ATMOSPHÈRE JUSTE POUR LE ROV
-            this.setAtmosphereForHeight(rovWorldPos.y);
 
-            const pipWidth = 600;
-            const pipHeight = 340;
-            const pipX = 20;
-            
-            // CORRECTION : WebGL compte à partir du bas. 
-            // Pour l'avoir en haut avec 20px de marge, on soustrait la hauteur de la fenêtre.
-            const pipY = window.innerHeight - pipHeight - 20; 
+            if (this.renderer.xr.isPresenting) {
+                // --- EN VR : Rendu sur l'écran virtuel attaché à la main ---
+                if (this.vrMonitorMesh) this.vrMonitorMesh.visible = true;
 
-            this.renderer.setViewport(pipX, pipY, pipWidth, pipHeight);
-            this.renderer.setScissor(pipX, pipY, pipWidth, pipHeight);
-            this.renderer.setScissorTest(true);
-            
-            this.renderer.render(this.scene, this.rovCamera);
+                const currentRenderTarget = this.renderer.getRenderTarget();
+
+                // 1. On coupe temporairement WebXR pour ne pas corrompre le FOV du casque
+                const xrEnabled = this.renderer.xr.enabled;
+                this.renderer.xr.enabled = false;
+
+                // 2. Rendu de l'écran 2D
+                this.renderer.setRenderTarget(this.rovRenderTarget);
+                this.renderer.clear();
+                this.setAtmosphereForHeight(rovWorldPos.y);
+                this.renderer.render(this.scene, this.rovCamera);
+
+                // 3. On rallume WebXR et on restaure la cible
+                this.renderer.setRenderTarget(currentRenderTarget);
+                this.renderer.xr.enabled = xrEnabled;
+
+                // 4. CRUCIAL : On restaure immédiatement l'atmosphère et la profondeur de la surface
+                const headWorldPos = new THREE.Vector3();
+                this.camera.getWorldPosition(headWorldPos);
+                this.setAtmosphereForHeight(headWorldPos.y);
+
+            } else {
+                // --- SUR ÉCRAN PC : Rendu classique en Picture-in-Picture HTML ---
+                if (this.vrMonitorMesh) this.vrMonitorMesh.visible = false;
+
+                const hud = document.getElementById('rov-video-hud');
+                if (hud && hud.style.display !== 'none') {
+                    this.renderer.clearDepth();
+                    this.setAtmosphereForHeight(rovWorldPos.y);
+
+                    const pipWidth = 600;
+                    const pipHeight = 340;
+                    const pipX = 20;
+                    const pipY = window.innerHeight - pipHeight - 20;
+
+                    this.renderer.setViewport(pipX, pipY, pipWidth, pipHeight);
+                    this.renderer.setScissor(pipX, pipY, pipWidth, pipHeight);
+                    this.renderer.setScissorTest(true);
+
+                    this.renderer.render(this.scene, this.rovCamera);
+                }
+            }
+        } else {
+            // Si le mode AR est désactivé, on cache l'écran VR
+            if (this.vrMonitorMesh) this.vrMonitorMesh.visible = false;
         }
 
         this.prevTime = time;
@@ -757,7 +1050,11 @@ this.camera.updateProjectionMatrix(); // Indispensable pour valider le changemen
         this.playerCollider.translate(deltaPosition);
         this.playerCollisions();
         
-        this.camera.position.copy(this.playerCollider.end);
+        this.syncCameraWithPlayerCollider();
+    }
+
+    private syncCameraWithPlayerCollider() {
+        this.camera.position.copy(this.playerCollider.end).sub(PLAYER_SPAWN_POSITION);
     }
 
     private getForwardVector() {

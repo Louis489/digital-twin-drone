@@ -1,0 +1,45 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": { "name": "North Atlantic Corridor" },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [[-74.0, 40.7], [-50.0, 43.0], [-20.0, 49.0], [4.5, 51.9]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "name": "Suez Asia-Europe Corridor" },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [[32.3, 31.2], [40.0, 18.0], [58.0, 12.0], [80.0, 7.0], [103.8, 1.3]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "name": "Panama Transpacific Corridor" },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [[-79.6, 9.0], [-100.0, 13.0], [-120.0, 22.0], [-118.2, 33.7]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "name": "English Channel Corridor" },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [[1.5, 51.0], [0.0, 50.6], [-2.0, 50.2], [-5.0, 49.5]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "name": "South Atlantic Corridor" },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [[-46.3, -23.9], [-20.0, -30.0], [18.4, -34.0]]
+      }
+    }
+  ]
+}
