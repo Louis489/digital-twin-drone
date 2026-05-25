@@ -9,6 +9,8 @@ import droneModelUrl from '../../assets/drone.glb?url';
 import shipModelUrl from '../../assets/ship.glb?url';
 import skyExrUrl from '../../assets/sky.exr?url';
 import turbineModelUrl from '../../assets/turbine.glb?url';
+import windTurbineModelUrl from '../../assets/wind_turbine.glb?url';
+import rov2ModelUrl from '../../assets/ROV2.glb?url';
 import { PathRecorder } from '../../Domain/Entities/PathRecorder';
 import { ReplayROVMissionUseCase } from '../../Application/UseCases/ReplayROVMission';
 import type { IXRService } from '../../Domain/Interfaces/IXRService';
@@ -87,9 +89,37 @@ export class ThreeShipService implements IXRService {
     private teleportTargetVector = new THREE.Vector3();
     private isTeleportTargetValid = false;
     private isARModeVRActive = false;
-    private menuButtonWasPressed = false;
+    private rightMenuWasPressed = false;
+    private leftMenuWasPressed = false;
+    private drone2: THREE.Group | null = null;
+    private isDraggingDrone2 = false;
+    private draggingController: THREE.Group | null = null;
+    private draggedPart: THREE.Mesh | null = null;
+    private dragDistance = 2.0;
+    private isExplodedView = false;
+    private drone2ExplodeData: Map<THREE.Object3D, { 
+        originalPos: THREE.Vector3; 
+        originalScale: THREE.Vector3; 
+        normalizedScale: THREE.Vector3; 
+        worldGridTarget?: THREE.Vector3; 
+        overriddenPos?: THREE.Vector3;
+        overriddenScale?: THREE.Vector3;
+    }> = new Map();
+    private hoveredMesh: THREE.Mesh | null = null;
+    private hoveredOriginalEmissive: THREE.Color = new THREE.Color();
+    private tooltipSprite!: THREE.Sprite;
+    private tooltipCanvas!: HTMLCanvasElement;
+    private tooltipContext!: CanvasRenderingContext2D;
+    private tooltipTexture!: THREE.CanvasTexture;
     private rovRenderTarget!: THREE.WebGLRenderTarget;
     private vrMonitorMesh?: THREE.Mesh;
+    private cockpitOverlay?: THREE.Mesh;
+    private cockpitCanvas!: HTMLCanvasElement;
+    private cockpitCtx!: CanvasRenderingContext2D;
+    private cockpitTexture!: THREE.CanvasTexture;
+    private sonarAngle = 0;
+    private sonarBlips: { x: number, y: number, alpha: number, color: string }[] = [];
+    private sonarRaycaster = new THREE.Raycaster();
 
     constructor(containerId: string) {
         const container = document.getElementById(containerId);
@@ -128,10 +158,10 @@ this.camera.updateProjectionMatrix(); // Indispensable pour valider le changemen
         this.renderer.xr.setReferenceSpaceType('local');
         container.appendChild(this.renderer.domElement);
 
-        // Initialisation du marqueur de téléportation (anneau vert)
-        const ringGeo = new THREE.RingGeometry(0.3, 0.4, 32);
+        // Initialisation du marqueur de téléportation (Cercle COLOSSAL)
+        const ringGeo = new THREE.RingGeometry(5.0, 5.8, 32); 
         ringGeo.rotateX(-Math.PI / 2);
-        const ringMat = new THREE.MeshBasicMaterial({ color: 0x00ff00, side: THREE.DoubleSide });
+        const ringMat = new THREE.MeshBasicMaterial({ color: 0x00ffcc, side: THREE.DoubleSide, transparent: true, opacity: 0.8 });
         this.teleportMarker = new THREE.Mesh(ringGeo, ringMat);
         this.teleportMarker.visible = false;
         this.scene.add(this.teleportMarker);
@@ -240,6 +270,9 @@ this.camera.updateProjectionMatrix(); // Indispensable pour valider le changemen
             
             this.scene.add(turbine);
             console.log("⚡ Fondation d'éolienne ajoutée au centre de mission !");
+            
+            // Chargement de l'éolienne aérienne (wind_turbine) par-dessus la fondation
+            this.loadTurbine();
         });
 
         // Chargement du navire principal
@@ -390,6 +423,9 @@ this.camera.updateProjectionMatrix(); // Indispensable pour valider le changemen
 
         // Chargement du drone sous l'eau
         this.loadDrone();
+        this.loadDrone2();
+        this.createCockpitOverlay();
+        this.initTooltipSystem();
 
         this.animate = this.animate.bind(this);
         this.renderer.setAnimationLoop(this.animate);
@@ -445,6 +481,288 @@ this.camera.updateProjectionMatrix(); // Indispensable pour valider le changemen
         }, undefined, (error) => {
             console.error("❌ Erreur de chargement GLB :", error);
         });
+    }
+
+    private loadTurbine() {
+        const loader = new GLTFLoader();
+        loader.load(windTurbineModelUrl, (gltf) => {
+            const turbine = gltf.scene;
+            
+            // Échelle géante pour correspondre à la fondation (qui a une échelle de 25)
+            turbine.scale.set(150, 100, 150); 
+            
+            // Orientation de 90° vers le bateau
+            turbine.rotation.y = -Math.PI / 2;
+            
+            // Positionnée exactement au niveau de la mer par-dessus la fondation (700, 0, -500)
+            turbine.position.set(700, 0, -500); 
+
+            // Intégration à l'Octree physique du monde pour les collisions ROV/Navire
+            turbine.traverse((child) => {
+                if ((child as THREE.Mesh).isMesh) {
+                    this.worldOctree.fromGraphNode(child);
+                }
+            });
+            
+            this.scene.add(turbine);
+            console.log(" [ThreeShipService] Turbine éolienne (wind_turbine) chargée au centre de la fondation !");
+        }, undefined, (error) => {
+            console.error(" Erreur de chargement de la turbine éolienne :", error);
+        });
+    }
+
+    private loadDrone2() {
+        const loader = new GLTFLoader();
+        loader.load(rov2ModelUrl, (gltf) => {
+            this.drone2 = gltf.scene;
+            this.drone2.scale.set(0.5, 0.5, 0.5);
+            this.drone2.visible = false;
+
+            this.drone2.traverse((child) => {
+                if ((child as THREE.Mesh).isMesh) {
+                    const mesh = child as THREE.Mesh;
+                    
+                    // Calcul de l'encombrement spatial réel de la pièce
+                    const meshBox = new THREE.Box3().setFromObject(mesh);
+                    const size = new THREE.Vector3();
+                    meshBox.getSize(size);
+                    const maxDim = Math.max(size.x, size.y, size.z);
+                    
+                    // On veut que chaque pièce fasse exactement 0.3m (30cm) pour rentrer dans la grille
+                    const scaleFactor = maxDim > 0.001 ? 0.3 / maxDim : 1;
+                    const normalizedScale = mesh.scale.clone().multiplyScalar(scaleFactor);
+
+                    this.drone2ExplodeData.set(mesh, { 
+                        originalPos: mesh.position.clone(),
+                        originalScale: mesh.scale.clone(),
+                        normalizedScale: normalizedScale
+                    });
+                }
+            });
+
+            this.scene.add(this.drone2);
+            console.log(" [ThreeShipService] ROV2 chargé !");
+        }, undefined, (error) => {
+            console.error(" Erreur de chargement ROV2 :", error);
+        });
+    }
+
+    private createCockpitOverlay() {
+        this.cockpitCanvas = document.createElement('canvas');
+        this.cockpitCanvas.width = 1024;
+        this.cockpitCanvas.height = 512;
+        this.cockpitCtx = this.cockpitCanvas.getContext('2d')!;
+        this.cockpitTexture = new THREE.CanvasTexture(this.cockpitCanvas);
+
+        const overlayGeo = new THREE.PlaneGeometry(0.8, 0.4);
+        const overlayMat = new THREE.MeshBasicMaterial({
+            map: this.cockpitTexture,
+            transparent: true,
+            opacity: 0.7,
+            side: THREE.DoubleSide
+        });
+
+        this.cockpitOverlay = new THREE.Mesh(overlayGeo, overlayMat);
+        this.cockpitOverlay.visible = false;
+        this.camera.add(this.cockpitOverlay);
+        this.cockpitOverlay.position.set(0, -0.08, -0.59);
+    }
+
+    private updateCockpitHUD(delta: number) {
+        if (!this.cockpitOverlay || !this.cockpitOverlay.visible || !this.drone) return;
+
+        const ctx = this.cockpitCtx;
+        const canvas = this.cockpitCanvas;
+        
+        // COORDONNÉES ÉCARTÉES VERS LES BORDS (Laissant le centre dégagé pour la vidéo)
+        const leftX = 180;  // Décalé à gauche (ancien 250)
+        const rightX = 844; // Décalé à droite (ancien 774)
+        const sonarX = 290; // Décalé à gauche (ancien 330)
+        const sonarY = 160;
+        const sonarR = 70;
+        const maxSonarRange = 250.0; // Portée de 250m pour les pylônes de l'éolienne
+
+        // 0. FOND GLOBAL FUMÉ
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = 'rgba(0, 15, 30, 0.3)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // --- 1. MOTEUR DU SONAR 360° (RAYCASTING PHYSIQUE) ---
+        this.sonarAngle += delta * 3.0; // Vitesse de rotation du balayage
+        if (this.sonarAngle > Math.PI * 2) this.sonarAngle -= Math.PI * 2;
+
+        // Direction locale du rayon (parfaitement plat sur l'horizon, Y = 0)
+        const sweepDir = new THREE.Vector3(Math.sin(this.sonarAngle), 0, -Math.cos(this.sonarAngle));
+        sweepDir.applyQuaternion(this.drone.quaternion).normalize(); // Orienté selon le cap du drone
+        
+        const rovPos = new THREE.Vector3();
+        this.drone.getWorldPosition(rovPos);
+        this.sonarRaycaster.set(rovPos, sweepDir);
+        this.sonarRaycaster.far = maxSonarRange;
+        
+        // FIX CRITIQUE : Assigner la caméra au raycaster pour éviter le crash sur les Sprites
+        this.sonarRaycaster.camera = this.camera; 
+
+        const intersects = this.sonarRaycaster.intersectObjects(this.scene.children, true);
+        let hitDistance = -1;
+
+        for (const hit of intersects) {
+            // Le sonar traverse les objets invisibles (boîtes de collision, triggers)
+            if (!hit.object.visible) continue;
+
+            // Exclure l'eau, le drone lui-même, l'UI éclatée, etc.
+            const isWater = hit.object === this.water;
+            const isDrone = hit.object.name.includes('ROV') || hit.object === this.drone || hit.object === this.drone2;
+            const isHUD = hit.object === this.teleportMarker || hit.object === this.cockpitOverlay || hit.object === this.vrMonitorMesh;
+            
+            if (!isWater && !isDrone && !isHUD) {
+                hitDistance = hit.distance;
+                break; // Premier vrai obstacle physique touché
+            }
+        }
+
+        if (hitDistance > 0) {
+            const ratio = hitDistance / maxSonarRange;
+            // Dessin du point sur le canvas (Y inversé par rapport à la 3D)
+            const localX = Math.sin(this.sonarAngle) * (ratio * sonarR);
+            const localY = -Math.cos(this.sonarAngle) * (ratio * sonarR);
+            
+            this.sonarBlips.push({
+                x: localX, y: localY, alpha: 1.0,
+                color: hitDistance < 20 ? '#ff0055' : '#ffcc00' // Rouge si < 20m, jaune sinon
+            });
+        }
+
+        // --- DESSIN DE L'UI DU SONAR ---
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        ctx.beginPath(); ctx.arc(sonarX, sonarY, sonarR + 5, 0, 2 * Math.PI); ctx.fill();
+
+        ctx.strokeStyle = 'rgba(0, 255, 204, 0.9)'; ctx.lineWidth = 2;
+        for(let r = 20; r <= sonarR; r += 20) {
+            ctx.beginPath(); ctx.arc(sonarX, sonarY, r, 0, 2 * Math.PI); ctx.stroke();
+        }
+        ctx.beginPath(); ctx.moveTo(sonarX - sonarR, sonarY); ctx.lineTo(sonarX + sonarR, sonarY);
+        ctx.moveTo(sonarX, sonarY - sonarR); ctx.lineTo(sonarX, sonarY + sonarR); ctx.stroke();
+
+        // Faisceau de balayage visuel (Secteur)
+        ctx.fillStyle = 'rgba(0, 255, 204, 0.3)';
+        ctx.beginPath(); ctx.moveTo(sonarX, sonarY);
+        const visualAngle = this.sonarAngle - Math.PI / 2; // Offset Canvas
+        ctx.arc(sonarX, sonarY, sonarR, visualAngle - 0.6, visualAngle); ctx.fill();
+
+        // Dessin et Fondu des Blips
+        for (let i = this.sonarBlips.length - 1; i >= 0; i--) {
+            const blip = this.sonarBlips[i];
+            blip.alpha -= delta * 0.4; // Disparaît en 2.5 secondes
+            if (blip.alpha <= 0) {
+                this.sonarBlips.splice(i, 1);
+                continue;
+            }
+            ctx.globalAlpha = blip.alpha;
+            ctx.fillStyle = blip.color; ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.arc(sonarX + blip.x, sonarY + blip.y, 4, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
+        }
+        ctx.globalAlpha = 1.0;
+
+        ctx.fillStyle = '#00ffcc'; ctx.font = 'bold 16px monospace'; ctx.textAlign = 'center';
+        ctx.fillText('SONAR MAP', sonarX, sonarY - sonarR - 15);
+
+        // --- 2. JAUGES DYNAMIQUES (PROFONDEUR ET ASSIETTE) ---
+        const depth = Math.max(0, -rovPos.y);
+        const pitch = -(new THREE.Euler().setFromQuaternion(this.drone.quaternion, 'YXZ').x) * (180 / Math.PI);
+
+        [ {x: leftX, val: depth, max: 100, label: 'DEPTH', unit: 'm'}, {x: rightX, val: pitch, max: 50, label: 'PITCH', unit: '°'} ].forEach(gauge => {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.6)'; ctx.fillRect(gauge.x - 55, 80, 110, 350);
+            ctx.strokeStyle = '#00ffcc'; ctx.fillStyle = '#00ffcc'; ctx.lineWidth = 3;
+            ctx.beginPath(); ctx.moveTo(gauge.x, 100); ctx.lineTo(gauge.x, 412); ctx.stroke();
+            for (let i = 0; i <= 10; i++) {
+                const y = 100 + i * 31.2;
+                ctx.beginPath(); ctx.moveTo(gauge.x, y); ctx.lineTo(gauge.x + (gauge.label === 'DEPTH' ? 15 : -15), y); ctx.stroke();
+            }
+            
+            // Position du curseur animée
+            const ratio = gauge.label === 'DEPTH' ? Math.min(gauge.val / gauge.max, 1.0) : (gauge.max - Math.max(-gauge.max, Math.min(gauge.max, gauge.val))) / (gauge.max * 2);
+            const cursorY = 100 + ratio * 312;
+            ctx.beginPath(); ctx.moveTo(gauge.x, cursorY); 
+            ctx.lineTo(gauge.x + (gauge.label === 'DEPTH' ? 25 : -25), cursorY - 10);
+            ctx.lineTo(gauge.x + (gauge.label === 'DEPTH' ? 25 : -25), cursorY + 10); ctx.fill();
+            
+            // Valeur numérique qui suit le curseur animée
+            ctx.font = 'bold 20px monospace'; 
+            ctx.textAlign = gauge.label === 'DEPTH' ? 'left' : 'right';
+            ctx.fillText(gauge.val.toFixed(1) + gauge.unit, gauge.x + (gauge.label === 'DEPTH' ? 35 : -35), cursorY + 6);
+            
+            // Titre fixe centré tout en haut de la jauge (aligné parfaitement au-dessus sur gauge.x)
+            ctx.font = 'bold 18px monospace';
+            ctx.fillStyle = '#00ffcc'; // S'assurer que le texte est bien cyan brillant
+            ctx.textAlign = 'center';
+            ctx.fillText(gauge.label, gauge.x, 70);
+        });
+
+        // --- 3. INFOS TEXTUELLES ET RÉTICULE ---
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)'; ctx.fillRect(256, 400, 512, 90);
+        ctx.fillStyle = '#00ffcc'; ctx.font = 'bold 24px monospace'; ctx.textAlign = 'center';
+        ctx.fillText('SYS: ROV COCKPIT HUD AR', 512, 435);
+        ctx.font = 'bold 20px monospace'; ctx.fillStyle = '#00ff99';
+        ctx.fillText(`BATTERY: 98% | LATENCY: ${Math.floor(Math.random()*5+20)}ms | DEPTH: ${depth.toFixed(1)}m`, 512, 470);
+
+        ctx.strokeStyle = 'rgba(0, 255, 204, 0.8)'; ctx.beginPath(); ctx.arc(512, 256, 18, 0, 2 * Math.PI); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(462, 256); ctx.lineTo(482, 256); ctx.moveTo(542, 256); ctx.lineTo(562, 256); ctx.moveTo(512, 206); ctx.lineTo(512, 226); ctx.moveTo(512, 286); ctx.lineTo(512, 306); ctx.stroke();
+
+        // Envoi de la texture rafraîchie à la carte graphique
+        this.cockpitTexture.needsUpdate = true;
+    }
+
+    private initTooltipSystem() {
+        this.tooltipCanvas = document.createElement('canvas');
+        this.tooltipCanvas.width = 512;
+        this.tooltipCanvas.height = 128;
+        this.tooltipContext = this.tooltipCanvas.getContext('2d')!;
+        this.tooltipTexture = new THREE.CanvasTexture(this.tooltipCanvas);
+        
+        const spriteMat = new THREE.SpriteMaterial({ 
+            map: this.tooltipTexture, 
+            depthTest: false,
+            transparent: true 
+        });
+        this.tooltipSprite = new THREE.Sprite(spriteMat);
+        this.tooltipSprite.scale.set(0.6, 0.15, 1);
+        this.tooltipSprite.visible = false;
+        this.tooltipSprite.renderOrder = 999; // Toujours au premier plan
+        this.scene.add(this.tooltipSprite);
+    }
+
+    private updateTooltipText(text: string) {
+        const ctx = this.tooltipContext;
+        ctx.clearRect(0, 0, 512, 128);
+
+        // Fond
+        ctx.fillStyle = 'rgba(0, 20, 30, 0.85)';
+        ctx.fillRect(10, 10, 492, 108);
+        ctx.strokeStyle = '#00ffcc';
+        ctx.lineWidth = 4;
+        ctx.strokeRect(10, 10, 492, 108);
+
+        // Nettoyage du texte et traduction basique
+        let cleanText = text.replace(/[-_0-9]/g, ' ').trim().toUpperCase();
+        if (!cleanText || cleanText === 'NODE') cleanText = "PIÈCE STRUCTURELLE";
+        if (cleanText.includes('BATTERY')) cleanText = "BATTERIE PRINCIPALE";
+        if (cleanText.includes('MOTOR') || cleanText.includes('THRUSTER')) cleanText = "MOTEUR / PROPULSEUR";
+
+        // Texte adaptatif
+        ctx.fillStyle = '#00ffcc';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        let fontSize = 40;
+        ctx.font = `bold ${fontSize}px monospace`;
+        while (ctx.measureText(cleanText).width > 460 && fontSize > 15) {
+            fontSize -= 2;
+            ctx.font = `bold ${fontSize}px monospace`;
+        }
+
+        ctx.fillText(cleanText, 256, 64);
+        this.tooltipTexture.needsUpdate = true;
     }
 
     public toggleARMode(isActive: boolean) {
@@ -625,13 +943,17 @@ this.camera.updateProjectionMatrix(); // Indispensable pour valider le changemen
         const monitorGeo = new THREE.PlaneGeometry(0.4, 0.3); // Taille : 40cm x 30cm
         const monitorMat = new THREE.MeshBasicMaterial({
             map: this.rovRenderTarget.texture,
-            side: THREE.DoubleSide
+            side: THREE.DoubleSide,
+            transparent: true,
+            opacity: 0.85 // Légère transparence pour garder la conscience de l'eau derrière
         });
         this.vrMonitorMesh = new THREE.Mesh(monitorGeo, monitorMat);
 
-        // Positionnement au-dessus du poignet
-        this.vrMonitorMesh.position.set(0, 0.15, -0.1);
-        this.vrMonitorMesh.rotation.x = -Math.PI / 4; // Incliné vers les yeux
+        // On attache l'écran directement à la caméra (le casque) pour qu'il suive le regard
+        this.camera.add(this.vrMonitorMesh); 
+        // Ajustement pour qu'il soit devant les yeux (légèrement en dessous du centre)
+        this.vrMonitorMesh.position.set(0, -0.08, -0.6); 
+        this.vrMonitorMesh.rotation.set(0, 0, 0);
         this.vrMonitorMesh.visible = false; // Caché par défaut
 
         // Contrôleur 1
@@ -648,7 +970,6 @@ this.camera.updateProjectionMatrix(); // Indispensable pour valider le changemen
             if (this.controller2) this.controller2.userData.inputSource = event.data;
         });
         this.controller2.add(new THREE.Line(geometry, material));
-        this.controller2.add(this.vrMonitorMesh);
         this.xrDolly.add(this.controller2);
     }
 
@@ -825,6 +1146,39 @@ this.camera.updateProjectionMatrix(); // Indispensable pour valider le changemen
         if (delta > 0.1) delta = 0.1;
         this.updateReplayROV(delta);
         this.updateROVTelemetryUI();
+        
+        // Mise à jour du Cockpit Virtuel en temps réel
+        this.updateCockpitHUD(delta);
+
+        if (this.drone2 && this.drone2.visible) {
+            if (!this.isExplodedView) this.drone2.rotation.y += 0.002; 
+
+            this.drone2.traverse((child) => {
+                if ((child as THREE.Mesh).isMesh && child !== this.draggedPart) {
+                    const data = this.drone2ExplodeData.get(child);
+                    if (data) {
+                        // Calcul de la cible
+                        let targetLocalPos = data.originalPos;
+                        let targetScale = data.originalScale;
+
+                        if (this.isExplodedView) {
+                            if (data.worldGridTarget) {
+                                if (data.overriddenPos) {
+                                    targetLocalPos = data.overriddenPos;
+                                } else {
+                                    targetLocalPos = child.parent!.worldToLocal(data.worldGridTarget.clone());
+                                }
+                            }
+                            // Priorité : 1. Taille customisée (si manipulée) -> 2. Taille standard de grille (30cm)
+                            targetScale = data.overriddenScale ? data.overriddenScale : data.normalizedScale;
+                        }
+
+                        child.position.lerp(targetLocalPos, 0.15);
+                        child.scale.lerp(targetScale, 0.15);
+                    }
+                }
+            });
+        }
 
         if (!this.renderer.xr.isPresenting) {
             if (this.controls && this.controls.isLocked === true) {
@@ -856,7 +1210,10 @@ this.camera.updateProjectionMatrix(); // Indispensable pour valider le changemen
         if (this.renderer.xr.isPresenting) {
             const session = this.renderer.xr.getSession();
             const inputSources = session ? Array.from(session.inputSources) : [];
-            let anyMenuPressed = false;
+            let rightARPressed = false;
+            let leftSummonPressed = false;
+            let currentHitMesh: THREE.Mesh | null = null;
+            let currentHitPoint = new THREE.Vector3();
 
             [this.controller1, this.controller2].forEach((controller, index) => {
                 if (!controller) return;
@@ -864,31 +1221,115 @@ this.camera.updateProjectionMatrix(); // Indispensable pour valider le changemen
                 const inputSource = controller.userData.inputSource || inputSources[index];
                 if (!inputSource || !inputSource.gamepad) return;
 
-                // MAPPING HTC VIVE STANDARD
-                const trigger = inputSource.gamepad.buttons[0];  // Gâchette
-                const grip = inputSource.gamepad.buttons[1];     // Boutons latéraux (Grip)
-                const touchpad = inputSource.gamepad.buttons[2]; // Gros pavé tactile
-                const menuBtn = inputSource.gamepad.buttons[3];  // Petit bouton du haut
+                const trigger = inputSource.gamepad.buttons[0];  
+                const grip = inputSource.gamepad.buttons[1];     
+                const touchpad = inputSource.gamepad.buttons[2]; 
+                const menuBtn = inputSource.gamepad.buttons[3];  
 
-                // Détection de l'appui pour la TÉLÉPORTATION (Touchpad ou Gâchette)
                 const isXRPressed = (touchpad && touchpad.pressed) || (trigger && trigger.pressed);
+                const isMenuOrGrip = (menuBtn && menuBtn.pressed) || (grip && grip.pressed);
 
-                // Détection de l'appui pour le MODE AR (Bouton Menu OU Bouton Grip latéral)
-                const isARPressed = (menuBtn && menuBtn.pressed) || (grip && grip.pressed);
-                if (isARPressed) {
-                    anyMenuPressed = true;
+                // DISPATCH PAR MAIN (HANDEDNESS)
+                if (isMenuOrGrip) {
+                    if (inputSource.handedness === 'right') {
+                        rightARPressed = true;
+                    } else if (inputSource.handedness === 'left') {
+                        leftSummonPressed = true;
+                    } else {
+                        // Fallback si le casque ne précise pas la main
+                        if (index === 0) rightARPressed = true;
+                        if (index === 1) leftSummonPressed = true;
+                    }
                 }
 
-                if (isXRPressed) {
+                // Calcul préalable systématique de l'origine et de la direction du laser
+                const tempMatrix = new THREE.Matrix4();
+                tempMatrix.extractRotation(controller.matrixWorld);
+                const direction = new THREE.Vector3(0, 0, -1).applyMatrix4(tempMatrix).normalize();
+                
+                const laserOrigin = new THREE.Vector3();
+                controller.getWorldPosition(laserOrigin);
+                this.teleportRaycaster.set(laserOrigin, direction);
+
+                // --- LOGIQUE DE SURBRILLANCE ET TRACTEUR SUR LE ROV2 ---
+                const isTriggerPressed = trigger && trigger.pressed;
+                
+                if (this.drone2 && this.drone2.visible && !this.isDraggingDrone2 && !this.draggedPart) {
+                    const droneIntersects = this.teleportRaycaster.intersectObject(this.drone2, true);
+                    if (droneIntersects.length > 0) {
+                        currentHitMesh = droneIntersects[0].object as THREE.Mesh;
+                        currentHitPoint.copy(droneIntersects[0].point);
+                        
+                        if (isTriggerPressed) {
+                            if (this.isExplodedView) {
+                                this.draggedPart = currentHitMesh; // On attrape juste LA pièce
+                            } else {
+                                this.isDraggingDrone2 = true; // On attrape TOUT le drone
+                            }
+                            this.draggingController = controller;
+                            this.dragDistance = 2.0; // Réinitialisation de la distance de drag
+                        }
+                    }
+                }
+
+                // --- AJUSTEMENT DE DISTANCE ET TAILLE AU TOUCHPAD ---
+                if (this.draggingController === controller && (this.isDraggingDrone2 || this.draggedPart)) {
+                    const touchpadAxes = inputSource.gamepad.axes;
+                    if (touchpadAxes && touchpadAxes.length >= 2) {
+                        const slideX = touchpadAxes[0]; // Axe X (-1 gauche, 1 droite)
+                        const slideY = touchpadAxes[1]; // Axe Y (-1 haut, 1 bas)
+
+                        // Ajustement de la distance (Haut/Bas)
+                        if (Math.abs(slideY) > 0.1) {
+                            this.dragDistance += slideY * 0.05;
+                            this.dragDistance = Math.max(0.5, Math.min(this.dragDistance, 5.0));
+                        }
+
+                        // Ajustement de la taille (Gauche/Droite) uniquement pour la pièce saisie
+                        if (Math.abs(slideX) > 0.1 && this.draggedPart) {
+                            const scaleAdjust = 1.0 + (slideX * 0.03); // Multiplicateur de sensibilité
+                            this.draggedPart.scale.multiplyScalar(scaleAdjust);
+                        }
+                    }
+                }
+
+                // --- DÉPLACEMENT DE L'OBJET SAISI (DRAG & DROP) ---
+                if (this.draggingController === controller && (this.isDraggingDrone2 || this.draggedPart)) {
+                    if (isTriggerPressed) {
+                        // Cible spatiale fixée par dragDistance
+                        const grabTarget = laserOrigin.clone().add(direction.multiplyScalar(this.dragDistance));
+                        
+                        if (this.draggedPart) {
+                            // Utiliser le parent direct pour gérer les pièces imbriquées dans le GLTF
+                            this.draggedPart.parent!.worldToLocal(grabTarget);
+                            this.draggedPart.position.copy(grabTarget);
+                        } else if (this.isDraggingDrone2) {
+                            this.drone2!.position.copy(grabTarget);
+                        }
+                        
+                        if (this.teleportMarker) this.teleportMarker.visible = false;
+                        this.isTeleportTargetValid = false;
+                        return; // Court-circuit
+                    } else {
+                        // RELÂCHEMENT (DROP) : Sauvegarder la position ET l'échelle exactes
+                        if (this.draggedPart) {
+                            const data = this.drone2ExplodeData.get(this.draggedPart);
+                            if (data) {
+                                data.overriddenPos = this.draggedPart.position.clone();
+                                data.overriddenScale = this.draggedPart.scale.clone();
+                            }
+                        }
+                        
+                        this.isDraggingDrone2 = false;
+                        this.draggedPart = null;
+                        this.draggingController = null;
+                    }
+                }
+
+                // --- LOGIQUE CLASSIQUE DE TÉLÉPORTATION ---
+                // (Ne s'exécute que si on n'est pas en train de manipuler un composant ou le drone entier)
+                if (isXRPressed && !this.isDraggingDrone2 && !this.draggedPart) {
                     this.activeTeleportController = controller;
-                    
-                    const tempMatrix = new THREE.Matrix4();
-                    tempMatrix.extractRotation(controller.matrixWorld);
-                    const direction = new THREE.Vector3(0, 0, -1).applyMatrix4(tempMatrix).normalize();
-                    
-                    const laserOrigin = new THREE.Vector3();
-                    controller.getWorldPosition(laserOrigin);
-                    this.teleportRaycaster.set(laserOrigin, direction);
                     
                     if (this.shipModel) {
                         const intersects = this.teleportRaycaster.intersectObject(this.shipModel, true);
@@ -898,7 +1339,7 @@ this.camera.updateProjectionMatrix(); // Indispensable pour valider le changemen
                             
                             if (this.teleportMarker) {
                                 this.teleportMarker.position.copy(hitPoint);
-                                this.teleportMarker.position.y += 0.05;
+                                this.teleportMarker.position.y += 0.30; // Plus haut pour éviter de rentrer dans les textures du sol
                                 this.teleportMarker.visible = true;
                             }
                             this.isTeleportTargetValid = true;
@@ -908,7 +1349,6 @@ this.camera.updateProjectionMatrix(); // Indispensable pour valider le changemen
                         }
                     }
                 } else if (this.activeTeleportController === controller && !isXRPressed) {
-                    // Relâchement : Exécution de la Téléportation + Compensation hauteur yeux
                     if (this.isTeleportTargetValid) {
                         this.xrDolly.position.copy(this.teleportTargetVector);
                         this.xrDolly.position.y += PLAYER_EYE_HEIGHT;
@@ -919,17 +1359,143 @@ this.camera.updateProjectionMatrix(); // Indispensable pour valider le changemen
                 }
             });
 
-            // Gestion de la bascule AR (Toggle) avec verrou anti-spam (Latch)
-            if (anyMenuPressed) {
-                if (!this.menuButtonWasPressed) {
+            // --- APPLICATION DU HOVER / SURBRILLANCE ---
+            if (this.draggedPart) {
+                // Si on manipule une pièce, on force l'étiquette sur celle-ci
+                currentHitMesh = this.draggedPart;
+                this.draggedPart.getWorldPosition(currentHitPoint);
+            } else if (this.isDraggingDrone2) {
+                // Si on déplace le drone entier, on cache l'étiquette pour plus de clarté
+                currentHitMesh = null; 
+            }
+
+            if (currentHitMesh !== this.hoveredMesh) {
+                // 1. Restaurer la couleur de l'ancien objet
+                const prevMesh = this.hoveredMesh;
+                if (prevMesh) {
+                    const prevAny = prevMesh as any;
+                    if (prevAny.material && prevAny.material.emissive) {
+                        prevAny.material.emissive.copy(this.hoveredOriginalEmissive);
+                    }
+                }
+                
+                this.hoveredMesh = currentHitMesh;
+                
+                // 2. Illuminer le nouvel objet
+                const newMesh = this.hoveredMesh;
+                if (newMesh) {
+                    const newAny = newMesh as any;
+                    if (newAny.material && newAny.material.emissive) {
+                        this.hoveredOriginalEmissive.copy(newAny.material.emissive);
+                        newAny.material.emissive.setHex(0x00ffcc); // Cyan brillant
+                    }
+                    this.updateTooltipText(newAny.name);
+                    this.tooltipSprite.visible = true;
+                } else {
+                    this.tooltipSprite.visible = false;
+                }
+            }
+            
+            // 3. Mise à jour de la position de l'étiquette
+            if (this.hoveredMesh && this.tooltipSprite.visible) {
+                this.tooltipSprite.position.copy(currentHitPoint);
+                this.tooltipSprite.position.y += 0.15; // Flotte au-dessus du point d'impact
+            }
+
+            // --- EXÉCUTION MAIN DROITE : TOGGLE AR ---
+            if (rightARPressed) {
+                if (!this.rightMenuWasPressed) {
                     this.isARModeVRActive = !this.isARModeVRActive;
                     this.toggleARMode(this.isARModeVRActive);
-                    console.log(`[VR] Mode AR basculé via manette : ${this.isARModeVRActive}`);
-                    this.menuButtonWasPressed = true;
+                    console.log(`[VR] Mode AR basculé via main DROITE : ${this.isARModeVRActive}`);
+                    
+                    // NOUVEAUTÉ : Si on active le mode AR, on nettoie le ROV2 flottant
+                    if (this.isARModeVRActive) {
+                        if (this.drone2) this.drone2.visible = false;
+                        this.isExplodedView = false;
+                        this.isDraggingDrone2 = false;
+                        this.draggedPart = null;
+                        if (this.tooltipSprite) this.tooltipSprite.visible = false;
+                        this.drone2ExplodeData.forEach(d => {
+                            delete d.overriddenPos;
+                            delete d.overriddenScale;
+                        });
+                    }
+                    
+                    this.rightMenuWasPressed = true;
                 }
             } else {
-                // On réarme le verrou dès que TOUS les boutons de commande AR sont relâchés
-                this.menuButtonWasPressed = false;
+                this.rightMenuWasPressed = false;
+            }
+
+            // --- EXÉCUTION MAIN GAUCHE : INVOCATION / EXPLOSION ROV2 ---
+            if (leftSummonPressed) {
+                if (!this.leftMenuWasPressed) {
+                    if (this.drone2) {
+                        if (!this.drone2.visible) {
+                            // 1ère pression : Invocation
+                            this.drone2.visible = true;
+                            const headPos = new THREE.Vector3();
+                            this.camera.getWorldPosition(headPos);
+                            const offset = new THREE.Vector3(0, 0.1, -1.2);
+                            offset.applyQuaternion(this.camera.quaternion);
+                            this.drone2.position.copy(headPos).add(offset);
+                            console.log("🛸 [VR] ROV2 invoqué via main GAUCHE !");
+                        } else {
+                            // Pressions suivantes : Toggle Vue Éclatée
+                            this.isExplodedView = !this.isExplodedView;
+                            
+                            if (this.isExplodedView) {
+                                // Calcul d'un Mur 2D dans le Monde Réel (World Space) face au joueur
+                                const headPos = new THREE.Vector3();
+                                this.camera.getWorldPosition(headPos);
+                                
+                                // Direction du regard, aplatie sur l'horizon
+                                const cameraDir = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+                                cameraDir.y = 0; 
+                                cameraDir.normalize();
+                                if (cameraDir.lengthSq() === 0) cameraDir.set(0, 0, -1); // Sécurité
+                                
+                                // Vecteurs pour construire la grille
+                                const rightDir = new THREE.Vector3().crossVectors(cameraDir, new THREE.Vector3(0, 1, 0)).normalize();
+                                const upDir = new THREE.Vector3(0, 1, 0);
+                                
+                                // Le centre de la grille est à 1.2 mètres devant le joueur
+                                const wallCenter = headPos.clone().add(cameraDir.multiplyScalar(1.2));
+                                // On baisse la grille de 30 cm seulement
+                                wallCenter.y -= 0.3; 
+                                
+                                const meshes = Array.from(this.drone2ExplodeData.keys());
+                                const cols = Math.ceil(Math.sqrt(meshes.length));
+                                
+                                const spacing = 0.50; // Augmenté de 0.35 à 0.50 pour plus d'air
+                                
+                                meshes.forEach((mesh, i) => {
+                                    const col = i % cols;
+                                    const row = Math.floor(i / cols);
+                                    const offsetX = (col - cols / 2) * spacing;
+                                    const offsetY = (cols / 2 - row) * spacing;
+                                    
+                                    const worldPos = wallCenter.clone()
+                                        .add(rightDir.clone().multiplyScalar(offsetX))
+                                        .add(upDir.clone().multiplyScalar(offsetY));
+                                        
+                                    const data = this.drone2ExplodeData.get(mesh);
+                                    if (data) data.worldGridTarget = worldPos;
+                                });
+                            } else {
+                                // Fermeture : nettoyage
+                                this.drone2ExplodeData.forEach(d => {
+                                    delete d.overriddenPos;
+                                    delete d.overriddenScale;
+                                });
+                            }
+                        }
+                    }
+                    this.leftMenuWasPressed = true;
+                }
+            } else {
+                this.leftMenuWasPressed = false;
             }
         }
 
@@ -940,8 +1506,9 @@ this.camera.updateProjectionMatrix(); // Indispensable pour valider le changemen
             this.rovCamera.getWorldPosition(rovWorldPos);
 
             if (this.renderer.xr.isPresenting) {
-                // --- EN VR : Rendu sur l'écran virtuel attaché à la main ---
+                // --- EN VR : Rendu sur l'écran virtuel de cockpit attaché à la caméra ---
                 if (this.vrMonitorMesh) this.vrMonitorMesh.visible = true;
+                if (this.cockpitOverlay) this.cockpitOverlay.visible = true;
 
                 const currentRenderTarget = this.renderer.getRenderTarget();
 
@@ -953,7 +1520,13 @@ this.camera.updateProjectionMatrix(); // Indispensable pour valider le changemen
                 this.renderer.setRenderTarget(this.rovRenderTarget);
                 this.renderer.clear();
                 this.setAtmosphereForHeight(rovWorldPos.y);
+                
+                // FIX ANTI-FEEDBACK LOOP : Cacher l'écran pendant qu'on filme la scène
+                if (this.vrMonitorMesh) this.vrMonitorMesh.visible = false;
+
                 this.renderer.render(this.scene, this.rovCamera);
+                
+                if (this.vrMonitorMesh) this.vrMonitorMesh.visible = true; // On le rallume
 
                 // 3. On rallume WebXR et on restaure la cible
                 this.renderer.setRenderTarget(currentRenderTarget);
@@ -967,6 +1540,7 @@ this.camera.updateProjectionMatrix(); // Indispensable pour valider le changemen
             } else {
                 // --- SUR ÉCRAN PC : Rendu classique en Picture-in-Picture HTML ---
                 if (this.vrMonitorMesh) this.vrMonitorMesh.visible = false;
+                if (this.cockpitOverlay) this.cockpitOverlay.visible = false;
 
                 const hud = document.getElementById('rov-video-hud');
                 if (hud && hud.style.display !== 'none') {
@@ -986,8 +1560,9 @@ this.camera.updateProjectionMatrix(); // Indispensable pour valider le changemen
                 }
             }
         } else {
-            // Si le mode AR est désactivé, on cache l'écran VR
+            // Si le mode AR est désactivé, on cache l'écran VR et le cockpit
             if (this.vrMonitorMesh) this.vrMonitorMesh.visible = false;
+            if (this.cockpitOverlay) this.cockpitOverlay.visible = false;
         }
 
         this.prevTime = time;

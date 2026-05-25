@@ -87,6 +87,8 @@ function setupBathymetryUI(): void {
 
 function setupWeatherLayersUI(weatherService: CesiumWeatherService): void {
   const weatherLayerInputs = document.querySelectorAll<HTMLInputElement>('input[name="weather-layer"]');
+  const apiKeyInput = document.getElementById('weather-api-key') as HTMLInputElement | null;
+  
   const weatherLayerByInputValue: Record<string, WeatherLayerType> = {
     wind: WeatherLayerType.Wind,
     temperature: WeatherLayerType.Temperature,
@@ -98,9 +100,18 @@ function setupWeatherLayersUI(weatherService: CesiumWeatherService): void {
   weatherLayerInputs.forEach((input) => {
     input.checked = false;
     input.addEventListener('change', () => {
+      const apiKey = apiKeyInput?.value.trim() || '';
       const selectedLayer = input.checked ? weatherLayerByInputValue[input.value] ?? WeatherLayerType.None : WeatherLayerType.None;
-      weatherService.setActiveLayer(selectedLayer);
-      console.info('[Weather] Couche météo sélectionnée :', selectedLayer);
+      
+      if (selectedLayer !== WeatherLayerType.None && !apiKey) {
+          console.warn('⚠️ Veuillez entrer une clé API OpenWeatherMap pour afficher la météo.');
+          input.checked = false; // Désélectionne si pas de clé
+          weatherService.setActiveLayer(WeatherLayerType.None, '');
+          return;
+      }
+      
+      weatherService.setActiveLayer(selectedLayer, apiKey);
+      console.info(`[Weather] Couche ${selectedLayer} activée.`);
     });
   });
 }
