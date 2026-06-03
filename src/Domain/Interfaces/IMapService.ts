@@ -20,6 +20,18 @@ export interface IGeoPosition {
 }
 
 /**
+ * @interface POIEntityProperties
+ * @description Propriétés pour les Points d'Intérêt (POI) cliquables
+ */
+export interface POIEntityProperties {
+  title: string;
+  description: string;
+  imageUrl: string;
+  targetId: string;
+  isPOI: true;
+}
+
+/**
  * @interface IMapService
  * @description Contrat pour les services de cartographie 3D.
  * Permet de découpler la logique métier de l'implémentation technique (Cesium, Google Maps, etc.)
@@ -36,20 +48,31 @@ export interface IMapService {
    * Ajoute un marqueur ponctuel sur la carte.
    * @param position - Coordonnées géographiques du point
    * @param options - Options de style (couleur, taille, etc.)
+   * @param properties - Propriétés personnalisées POI (optionnel)
    * @returns Identifiant unique de l'entité créée
    */
   addPointMarker(
     position: IGeoPosition,
-    options?: PointMarkerOptions
+    options?: PointMarkerOptions,
+    properties?: POIEntityProperties
   ): string;
+
+  /**
+   * Récupère les propriétés d'une entité par son identifiant.
+   * @param entityId - Identifiant de l'entité
+   * @returns Propriétés de l'entité ou null si non trouvé
+   */
+  getEntityProperties(entityId: string): POIEntityProperties | null;
 
   /**
    * Déplace la caméra vers une position spécifique.
    * @param position - Coordonnées cibles
    * @param altitude - Altitude de la caméra en mètres
    * @param duration - Durée de l'animation en secondes (0 = instantané)
+   * @param heading - Orientation caméra en radians (optionnel)
+   * @param pitch - Inclinaison caméra en radians (optionnel)
    */
-  flyTo(position: IGeoPosition, altitude: number, duration?: number): void;
+  flyTo(position: IGeoPosition, altitude: number, duration?: number, heading?: number, pitch?: number): void;
 
   /**
    * Ajoute une couche WMS/WMTS à la carte.
@@ -68,9 +91,9 @@ export interface IMapService {
   /**
    * Configure le gestionnaire d'événements de clic sur une entité.
    * @param entityId - Identifiant de l'entité cliquable
-   * @param callback - Fonction appelée au clic
+   * @param callback - Fonction appelée au clic avec les propriétés POI
    */
-  setEntityClickHandler(entityId: string, callback: () => void): void;
+  setEntityClickHandler(entityId: string, callback: (properties?: POIEntityProperties) => void): void;
 
   /**
    * Détruit le viewer et libère les ressources.

@@ -6,4 +6,7 @@ export { TelemetryService, type TelemetryPoint } from './Services/TelemetryServi
 export { MockAISService } from './Services/MockAISService';
 export { MockGlobalAISService } from './Services/MockGlobalAISService';
 export { AISStreamWebSocketService } from './Services/AISStreamWebSocketService';
+export { POIHubService } from './Services/POIHubService';
+export { WeatherDashboardService } from './Services/WeatherDashboardService';
+export { OilSimulationService } from './Services/OilSimulationService';
 export { createShipModelBlobUrl } from './Helpers/ShipModelFactory';

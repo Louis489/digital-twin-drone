@@ -25,7 +25,6 @@ export type SceneTransitionCallback = () => void;
  */
 export class GlobeScene {
   private container: HTMLElement;
-  private onTransition: SceneTransitionCallback | null = null;
   private mapService: IMapService;
   private initializeMission: InitializeMission;
 
@@ -35,8 +34,7 @@ export class GlobeScene {
    * @param onTransition - Callback pour la transition vers DroneScene
    */
   constructor(
-    containerOrId: string | HTMLElement,
-    onTransition?: SceneTransitionCallback
+    containerOrId: string | HTMLElement
   ) {
     if (typeof containerOrId === 'string') {
       const el = document.getElementById(containerOrId);
@@ -45,10 +43,6 @@ export class GlobeScene {
       this.container = el;
     } else {
       this.container = containerOrId;
-    }
-
-    if (onTransition) {
-      this.onTransition = onTransition;
     }
 
     // Injection de dépendance : On injecte CesiumMapService mais GlobeScene ne sait que c'est Cesium
@@ -72,20 +66,21 @@ export class GlobeScene {
           latitude: 52.5,
           altitude: 0,
         },
-        cameraAltitude: 15000000, // 15,000 km - vue globale
-        flyDuration: 0, // Positionnement immédiat
+        cameraAltitude: 8000000, // 8 000 km — vue Atlantique inclinée
+        cameraHeading: Cesium.Math.toRadians(5),
+        cameraPitch: Cesium.Math.toRadians(-75), // -45° : voir l'horizon
+        flyDuration: 10, // Positionnement immédiat
         markerOptions: {
-          color: '#ff0000', // Rouge
-          pixelSize: 15,
-          name: 'Mission Offshore - Clic pour démarrer',
+          color: '#ff0000',
+          pixelSize: 18,
+          name: 'Scène 3D VR',
         },
       };
 
       // Exécution du Use Case - tout la logique métier est encapsulée
       const result = await this.initializeMission.execute(
         this.container,
-        missionConfig,
-        this.onTransition ?? undefined
+        missionConfig
       );
 
       if (!result.success) {
@@ -94,9 +89,101 @@ export class GlobeScene {
           result.error
         );
       }
+
+      // Overlay titre Hub
+      this.injectHubOverlay();
     } catch (error) {
       console.error('Exception dans GlobeScene.init:', error);
     }
+  }
+
+  /**
+   * @method injectHubOverlay
+   * @private
+   * Injecte l'overlay HTML "Command Center" au-dessus du canvas Cesium.
+   */
+  private injectHubOverlay(): void {
+    const overlayId = 'hub-overlay';
+    if (document.getElementById(overlayId)) return;
+
+    const overlay = document.createElement('div');
+    overlay.id = overlayId;
+    overlay.innerHTML = `
+      <div class="hub-title-block">
+        <div class="hub-title">DIGITAL TWIN HUB</div>
+        <div class="hub-subtitle">Sélectionnez un environnement de simulation</div>
+        <div class="hub-divider"></div>
+      </div>
+    `;
+
+    const style = document.createElement('style');
+    style.id = 'hub-overlay-styles';
+    style.textContent = `
+      #hub-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        pointer-events: none;
+        z-index: 100;
+        display: flex;
+        justify-content: center;
+        padding-top: 28px;
+      }
+
+      .hub-title-block {
+        text-align: center;
+        user-select: none;
+      }
+
+      .hub-title {
+        font-family: 'Orbitron', 'Segoe UI', 'Arial', sans-serif;
+        font-size: clamp(22px, 3.5vw, 42px);
+        font-weight: 900;
+        letter-spacing: 0.25em;
+        color: #ffffff;
+        text-shadow:
+          0 0 20px rgba(0, 229, 255, 0.9),
+          0 0 50px rgba(0, 229, 255, 0.5),
+          0 2px 4px rgba(0,0,0,0.8);
+        line-height: 1.1;
+      }
+
+      .hub-subtitle {
+        font-family: 'Segoe UI', Arial, sans-serif;
+        font-size: clamp(11px, 1.4vw, 16px);
+        font-weight: 400;
+        letter-spacing: 0.3em;
+        color: rgba(0, 229, 255, 0.85);
+        text-transform: uppercase;
+        margin-top: 8px;
+        text-shadow: 0 1px 6px rgba(0,0,0,0.7);
+      }
+
+      .hub-divider {
+        margin: 12px auto 0;
+        width: 160px;
+        height: 1px;
+        background: linear-gradient(90deg, transparent, rgba(0,229,255,0.7), transparent);
+      }
+    `;
+
+    if (!document.getElementById('hub-overlay-styles')) {
+      document.head.appendChild(style);
+    }
+    document.body.appendChild(overlay);
+  }
+
+  /**
+   * @method removeHubOverlay
+   * @private
+   * Retire l'overlay Hub lors du changement de vue.
+   */
+  private removeHubOverlay(): void {
+    const overlay = document.getElementById('hub-overlay');
+    if (overlay) overlay.remove();
+    const style = document.getElementById('hub-overlay-styles');
+    if (style) style.remove();
   }
 
   /**
@@ -105,6 +192,7 @@ export class GlobeScene {
    * Appelé lors de la destruction du composant.
    */
   public dispose(): void {
+    this.removeHubOverlay();
     this.initializeMission.dispose();
   }
 
@@ -115,6 +203,15 @@ export class GlobeScene {
    */
   public getViewer(): Cesium.Viewer {
     return (this.mapService as CesiumMapService).getViewer() as Cesium.Viewer;
+  }
+
+  /**
+   * @method getMapService
+   * @description Expose le service de carte pour configurer les interactions POI.
+   * @returns Le CesiumMapService
+   */
+  public getMapService(): CesiumMapService {
+    return this.mapService as CesiumMapService;
   }
 
   /**

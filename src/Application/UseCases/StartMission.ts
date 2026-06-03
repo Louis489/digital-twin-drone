@@ -4,12 +4,18 @@ export class StartMissionUseCase {
         const loaderDiv = document.getElementById('loading-screen');
         const threeDiv = document.getElementById('three-container');
         const uiPanel = document.getElementById('ui-panel'); // Masquer le menu wms
+        const mainControlPanel = document.getElementById('main-control-panel');
+        const hubOverlay = document.getElementById('hub-overlay');
+        const poiPanel = document.getElementById('poi-side-panel');
 
         if (!cesiumDiv || !loaderDiv || !threeDiv) return;
 
-        // 1. Masquer Cesium et afficher le loader
+        // 1. Masquer Cesium, les éléments Hub et afficher le loader
         cesiumDiv.style.display = 'none';
         if (uiPanel) uiPanel.style.display = 'none';
+        if (mainControlPanel) mainControlPanel.style.display = 'none';
+        if (hubOverlay) hubOverlay.style.display = 'none';
+        if (poiPanel) poiPanel.style.display = 'none';
         loaderDiv.style.display = 'flex';
 
         // 2. Simuler un temps de chargement réseau/3D (1.5 secondes)

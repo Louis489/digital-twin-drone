@@ -1,7 +1,7 @@
 import { DroneScene, GlobeScene } from './Presentation';
 import { Drone, WeatherLayerType } from './Domain';
 import { ReplayTelemetryUseCase, ToggleBathymetryUseCase, StartMissionUseCase, ToggleARVisionUseCase, StartImmersiveARUseCase, ManageShipTrafficUseCase } from './Application';
-import { TelemetryService, CesiumOceanoService, AISStreamWebSocketService, CesiumWeatherService } from './Infrastructure';
+import { TelemetryService, CesiumOceanoService, AISStreamWebSocketService, CesiumWeatherService, POIHubService, WeatherDashboardService } from './Infrastructure';
 import type { Ship } from './Domain';
 import { LodLevel } from './Domain';
 import { ThreeShipService } from './Infrastructure/Services/ThreeShipService';
@@ -18,6 +18,8 @@ let currentScene: GlobeScene | DroneScene | null = null;
 let oceanoService: CesiumOceanoService | null = null;
 let toggleBathyUseCase: ToggleBathymetryUseCase | null = null;
 let threeShipService: ThreeShipService | null = null;
+let poiHubService: POIHubService | null = null;
+let weatherDashboardService: WeatherDashboardService | null = null;
 
 function startTelemetryReplay(): void {
   if (!threeShipService) {
@@ -66,6 +68,49 @@ function setupBackButton(): void {
     if (threeShipService) {
       threeShipService.deactivateSimulation();
     }
+    loadGlobeScene();
+  });
+}
+
+function showWeatherDashboard(): void {
+  // Masquer tous les éléments du Hub
+  const mainControlPanel = document.getElementById('main-control-panel');
+  const hubOverlay = document.getElementById('hub-overlay');
+  const poiPanel = document.getElementById('poi-side-panel');
+  
+  if (mainControlPanel) mainControlPanel.style.display = 'none';
+  if (hubOverlay) hubOverlay.style.display = 'none';
+  if (poiPanel) poiPanel.style.display = 'none';
+  if (cesiumContainer) cesiumContainer.style.display = 'none';
+  
+  // Fermer le panneau POI
+  if (poiHubService) {
+    poiHubService.hide();
+  }
+  
+  // Initialiser et afficher le dashboard météo
+  if (!weatherDashboardService) {
+    weatherDashboardService = new WeatherDashboardService();
+  }
+  
+  weatherDashboardService.show();
+  weatherDashboardService.initMap();
+  
+  console.log('[Main] Weather Dashboard displayed');
+}
+
+function setupReturnHubButton(): void {
+  const returnHubBtn = document.getElementById('btn-return-hub');
+  if (!returnHubBtn) return;
+  
+  returnHubBtn.addEventListener('click', () => {
+    // Masquer et détruire le dashboard météo
+    if (weatherDashboardService) {
+      weatherDashboardService.hide();
+      weatherDashboardService.destroyMap();
+    }
+    
+    // Retour au Hub
     loadGlobeScene();
   });
 }
@@ -119,6 +164,11 @@ function setupWeatherLayersUI(weatherService: CesiumWeatherService): void {
 async function loadGlobeScene(): Promise<void> {
   if (!cesiumContainer) return;
 
+  if (poiHubService) {
+    poiHubService.destroy();
+    poiHubService = null;
+  }
+
   if (currentScene) {
     currentScene.dispose();
     currentScene = null;
@@ -129,6 +179,22 @@ async function loadGlobeScene(): Promise<void> {
   if (backButton) {
     backButton.style.display = 'none';
   }
+
+  // Restaurer la visibilité des éléments du Hub
+  const mainControlPanel = document.getElementById('main-control-panel');
+  const hubOverlay = document.getElementById('hub-overlay');
+  const threeDiv = document.getElementById('three-container');
+  const fpsUI = document.getElementById('fps-ui');
+  const poiPanel = document.getElementById('poi-side-panel');
+  
+  if (mainControlPanel) mainControlPanel.style.display = 'block';
+  if (hubOverlay) hubOverlay.style.display = 'flex';
+  if (threeDiv) threeDiv.style.display = 'none';
+  if (fpsUI) fpsUI.style.display = 'none';
+  if (poiPanel) poiPanel.style.display = 'block';
+  
+  // Afficher le conteneur Cesium
+  cesiumContainer.style.display = 'block';
 
   try {
     // Initialisation de la Présentation (Le Globe)
@@ -141,10 +207,35 @@ async function loadGlobeScene(): Promise<void> {
     oceanoService = new CesiumOceanoService(viewer);
     const currentOceanoService = oceanoService;
     const weatherService = new CesiumWeatherService(viewer);
-
-    // Initialisation de l'Application (Cas d'Usage)
     toggleBathyUseCase = new ToggleBathymetryUseCase(oceanoService);
     const startMissionUseCase = new StartMissionUseCase();
+
+    // ─── HUB POI (Panneau latéral droit) ───
+    poiHubService = new POIHubService();
+    // Récupérer le CesiumMapService depuis GlobeScene pour configurer le clic POI
+    const mapService = scene.getMapService();
+    mapService.setGlobalPOIClickHandler((entityId, properties) => {
+      poiHubService?.handlePOIClick(entityId, properties);
+    });
+    // Callback déclenché uniquement par le bouton "Essayer la simulation"
+    poiHubService.onSimulationStart(async (targetId) => {
+      console.log(`Redirection vers ${targetId}`);
+      
+      if (targetId === 'scene-3d') {
+        poiHubService?.destroy();
+        poiHubService = null;
+        await startMissionUseCase.execute();
+        if (threeShipService) {
+          threeShipService.activateSimulation();
+        }
+        startTelemetryReplay();
+      } else if (targetId === 'meteo-dashboard') {
+        // Transition vers le Dashboard Météo 2D
+        showWeatherDashboard();
+      }
+    });
+
+    // Initialisation de l'Application (Cas d'Usage)
 
     // ─── AIS temps réel (ManageShipTrafficUseCase) ───
     const aisRepository = new AISStreamWebSocketService();
@@ -208,17 +299,6 @@ async function loadGlobeScene(): Promise<void> {
       });
     }
 
-    // Connexion du clic Cesium vers le UseCase de transition
-    scene.onMarkerClick(async () => {
-      await startMissionUseCase.execute();
-      // Activer la simulation (verrouillage curseur)
-      if (threeShipService) {
-        threeShipService.activateSimulation();
-      }
-      // Après transition UI, lancer le chargement CSV et replay
-      startTelemetryReplay();
-    });
-
     // Configuration UI
     setupBathymetryUI();
     setupWeatherLayersUI(weatherService);
@@ -229,6 +309,7 @@ async function loadGlobeScene(): Promise<void> {
 
 async function init(): Promise<void> {
   setupBackButton();
+  setupReturnHubButton();
   
   // Initialisation de la scène Three.js (masquée au départ)
   threeShipService = new ThreeShipService('three-container');
@@ -293,6 +374,10 @@ async function init(): Promise<void> {
   await loadGlobeScene();
 
   window.addEventListener('beforeunload', () => {
+    if (poiHubService) {
+      poiHubService.destroy();
+      poiHubService = null;
+    }
     if (currentScene) {
       currentScene.dispose();
     }

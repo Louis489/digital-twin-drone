@@ -13,6 +13,7 @@ import {
   IGeoPosition,
   PointMarkerOptions,
   WMSLayerOptions,
+  POIEntityProperties,
 } from '../../Domain/Interfaces/IMapService';
 
 /**
@@ -25,7 +26,9 @@ export class CesiumMapService implements IMapService {
   private viewer: Cesium.Viewer | null = null;
   private container: HTMLElement | null = null;
   private entitiesMap: Map<string, Cesium.Entity> = new Map();
-  private clickHandlers: Map<string, () => void> = new Map();
+  private entityProperties: Map<string, POIEntityProperties> = new Map();
+  private clickHandlers: Map<string, (properties?: POIEntityProperties) => void> = new Map();
+  private globalPOIClickHandler?: (entityId: string, properties: POIEntityProperties) => void;
 
   /**
    * @inheritdoc
@@ -61,6 +64,9 @@ export class CesiumMapService implements IMapService {
       );
     }
 
+    // Initialisation différée pour éviter les lags au démarrage
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
     this.viewer = new Cesium.Viewer(this.container, {
       animation: false,
       timeline: false,
@@ -84,21 +90,38 @@ export class CesiumMapService implements IMapService {
 
     // Configuration globale des clics
     this.setupGlobalClickHandler();
+
+    // Écouteur de chargement des tuiles pour masquer l'écran de chargement
+    this.viewer.scene.globe.tileLoadProgressEvent.addEventListener((progress: number) => {
+      if (progress === 0) {
+        // Le chargement est terminé
+        const overlay = document.getElementById('loading-overlay');
+        if (overlay) {
+          overlay.style.display = 'none';
+          console.log('[CesiumMapService] Loading overlay hidden');
+        }
+      }
+    });
   }
 
   /**
    * @inheritdoc
-   * Ajoute un marqueur ponctuel sur la carte.
+   * Ajoute un marqueur ponctuel sur la carte avec propriétés POI optionnelles.
    */
   public addPointMarker(
     position: IGeoPosition,
-    options: PointMarkerOptions = {}
+    options: PointMarkerOptions = {},
+    properties?: POIEntityProperties
   ): string {
     if (!this.viewer) {
       throw new Error('Le viewer n\'est pas initialisé.');
     }
 
     const entityId = `marker-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+    const labelText = (options.name ?? 'Point').toUpperCase();
+    const pointColor = this.parseColor(options.color ?? '#ff0000');
+    const isWeather = (options.color ?? '').toLowerCase() === '#00e5ff';
 
     const entity = this.viewer.entities.add({
       id: entityId,
@@ -108,26 +131,71 @@ export class CesiumMapService implements IMapService {
         position.altitude ?? 0
       ),
       point: {
-        pixelSize: options.pixelSize ?? 15,
-        color: this.parseColor(options.color ?? '#ff0000'),
-        outlineColor: this.parseColor(options.outlineColor ?? '#ffffff'),
-        outlineWidth: options.outlineWidth ?? 2,
+        pixelSize: options.pixelSize ?? 18,
+        color: pointColor,
+        outlineColor: Cesium.Color.WHITE,
+        outlineWidth: 3,
+        scaleByDistance: new Cesium.NearFarScalar(1e6, 1.4, 1e8, 0.6),
+        translucencyByDistance: new Cesium.NearFarScalar(1e6, 1.0, 2e8, 0.3),
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+      label: {
+        text: labelText,
+        font: isWeather ? 'bold 13px \'Segoe UI\', sans-serif' : 'bold 14px \'Segoe UI\', sans-serif',
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        fillColor: isWeather ? Cesium.Color.fromCssColorString('#00e5ff') : Cesium.Color.WHITE,
+        outlineColor: Cesium.Color.BLACK,
+        outlineWidth: 2,
+        pixelOffset: new Cesium.Cartesian2(0, -32),
+        horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+        verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+        showBackground: true,
+        backgroundColor: Cesium.Color.fromCssColorString('rgba(1, 8, 22, 0.75)'),
+        backgroundPadding: new Cesium.Cartesian2(10, 6),
+        scaleByDistance: new Cesium.NearFarScalar(1e6, 1.2, 1e8, 0.5),
+        translucencyByDistance: new Cesium.NearFarScalar(1e6, 1.0, 2e8, 0.0),
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
       },
       name: options.name ?? 'Point',
     });
 
     this.entitiesMap.set(entityId, entity);
+
+    // Stocker les propriétés POI si fournies
+    if (properties) {
+      this.entityProperties.set(entityId, properties);
+    }
+
     return entityId;
   }
 
   /**
    * @inheritdoc
-   * Déplace la caméra vers une position spécifique.
+   * Récupère les propriétés d'une entité POI.
+   */
+  public getEntityProperties(entityId: string): POIEntityProperties | null {
+    return this.entityProperties.get(entityId) ?? null;
+  }
+
+  /**
+   * @method setGlobalPOIClickHandler
+   * @description Configure un gestionnaire global pour tous les clics POI.
+   * @param handler - Fonction appelée quand un POI est cliqué
+   */
+  public setGlobalPOIClickHandler(handler: (entityId: string, properties: POIEntityProperties) => void): void {
+    this.globalPOIClickHandler = handler;
+  }
+
+  /**
+   * @inheritdoc
+   * Déplace la caméra vers une position spécifique avec orientation optionnelle.
    */
   public flyTo(
     position: IGeoPosition,
     altitude: number,
-    duration: number = 0
+    duration: number = 0,
+    heading: number = 0,
+    pitch: number = -Math.PI / 2
   ): void {
     if (!this.viewer) {
       throw new Error('Le viewer n\'est pas initialisé.');
@@ -139,6 +207,11 @@ export class CesiumMapService implements IMapService {
         position.latitude,
         altitude
       ),
+      orientation: {
+        heading: heading,
+        pitch: pitch,
+        roll: 0,
+      },
       duration: duration,
     });
   }
@@ -193,7 +266,7 @@ export class CesiumMapService implements IMapService {
    * @inheritdoc
    * Configure le gestionnaire de clic pour une entité.
    */
-  public setEntityClickHandler(entityId: string, callback: () => void): void {
+  public setEntityClickHandler(entityId: string, callback: (properties?: POIEntityProperties) => void): void {
     this.clickHandlers.set(entityId, callback);
   }
 
@@ -232,10 +305,18 @@ export class CesiumMapService implements IMapService {
 
         if (Cesium.defined(pickedObject) && pickedObject.id) {
           const entityId = pickedObject.id.id;
-          const callback = this.clickHandlers.get(entityId);
+          const properties = this.entityProperties.get(entityId);
 
+          // Si c'est un POI avec propriétés
+          if (properties && this.globalPOIClickHandler) {
+            this.globalPOIClickHandler(entityId, properties);
+            return;
+          }
+
+          // Sinon, gestion legacy
+          const callback = this.clickHandlers.get(entityId);
           if (callback) {
-            callback();
+            callback(properties);
           }
         }
       },
