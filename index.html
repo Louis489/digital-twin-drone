@@ -217,6 +217,13 @@
         100% { transform: rotate(360deg); }
       }
       
+      /* Animation pulse pour la barre de progression indéterminée */
+      @keyframes pulse {
+        0% { opacity: 1; }
+        50% { opacity: 0.5; }
+        100% { opacity: 1; }
+      }
+      
       /* Animation clignotante pour le bouton d'urgence */
       @keyframes pulse-warning {
         0%, 100% { 

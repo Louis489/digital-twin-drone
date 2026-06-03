@@ -5,6 +5,7 @@ import { TelemetryService, CesiumOceanoService, AISStreamWebSocketService, Cesiu
 import type { Ship } from './Domain';
 import { LodLevel } from './Domain';
 import { ThreeShipService } from './Infrastructure/Services/ThreeShipService';
+import shipModelUrl from './assets/ship.glb?url';
 
 const cesiumContainer = document.getElementById('cesium-container');
 const backButton = document.getElementById('back-button');
@@ -264,19 +265,43 @@ async function loadGlobeScene(): Promise<void> {
         
         poiHubService?.destroy();
         poiHubService = null;
+        
+        // Masquer Cesium/Hub et afficher le loader (NE révèle PAS la scène 3D)
         await startMissionUseCase.execute();
         
-        // Attendre que le bateau soit complètement chargé avant de continuer
+        // VERROU ASYNCHRONE ABSOLU : on attend le chargement complet du bateau
         if (threeShipService) {
-          await threeShipService.loadShipModel('/src/assets/ship.glb');
-          threeShipService.activateSimulation();
+          const textEl = document.getElementById('model-loading-text');
+          const barEl = document.getElementById('model-loading-bar');
+          if (textEl) textEl.innerText = 'Chargement du navire...';
+          if (barEl) barEl.style.width = '0%';
+          
+          console.log('[Main] Démarrage du chargement du bateau...');
+          console.log('[Main] URL du modèle:', shipModelUrl);
+          
+          try {
+            // 1. ATTENTE BLOQUANTE du téléchargement réel du fichier (86 Mo)
+            await threeShipService.loadShipModel(shipModelUrl);
+            console.log('[Main] Chargement du bateau terminé avec succès !');
+            threeShipService.activateSimulation();
+            
+            // 2. RÉVÉLATION DE LA SCÈNE UNIQUEMENT EN CAS DE SUCCÈS
+            startMissionUseCase.revealScene();
+            if (loadingContainer) loadingContainer.style.display = 'none';
+            
+            // 3. Démarrer la télémétrie
+            startTelemetryReplay();
+          } catch (error) {
+            // ÉCHEC : on NE cache PAS l'écran de chargement, on affiche l'erreur
+            console.error('[Main] Échec critique du chargement 3D:', error);
+            if (textEl) textEl.innerText = 'Erreur de chargement. Veuillez rafraîchir.';
+            if (barEl) {
+              barEl.style.width = '100%';
+              barEl.style.backgroundColor = '#ff4444';
+              barEl.style.animation = 'none';
+            }
+          }
         }
-        
-        // Masquer l'écran de chargement une fois tout chargé
-        if (loadingScreen) loadingScreen.style.display = 'none';
-        if (loadingContainer) loadingContainer.style.display = 'none';
-        
-        startTelemetryReplay();
       } else if (targetId === 'meteo-dashboard') {
         // Transition vers le Dashboard Météo 2D
         showWeatherDashboard();

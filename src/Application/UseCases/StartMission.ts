@@ -1,4 +1,9 @@
 export class StartMissionUseCase {
+    /**
+     * Prépare la transition vers la scène 3D : masque Cesium et le Hub, affiche le loader.
+     * NE révèle PAS la scène 3D - cela doit être fait par l'appelant UNIQUEMENT après
+     * le chargement complet du modèle (voir revealScene).
+     */
     public async execute(): Promise<void> {
         const cesiumDiv = document.getElementById('cesium-container');
         const loaderDiv = document.getElementById('loading-screen');
@@ -10,7 +15,7 @@ export class StartMissionUseCase {
 
         if (!cesiumDiv || !loaderDiv || !threeDiv) return;
 
-        // 1. Masquer Cesium, les éléments Hub et afficher le loader
+        // Masquer Cesium, les éléments Hub et afficher le loader
         cesiumDiv.style.display = 'none';
         if (uiPanel) uiPanel.style.display = 'none';
         if (mainControlPanel) mainControlPanel.style.display = 'none';
@@ -18,15 +23,21 @@ export class StartMissionUseCase {
         if (poiPanel) poiPanel.style.display = 'none';
         loaderDiv.style.display = 'flex';
 
-        // 2. Simuler un temps de chargement réseau/3D (1.5 secondes)
-        await new Promise(resolve => setTimeout(resolve, 1500));
+        // PAS de setTimeout, PAS de dévoilement de la scène 3D ici.
+        // La scène 3D ne doit être révélée qu'APRÈS le chargement complet du modèle.
+    }
 
-        // 3. Masquer le loader et afficher la scène Three.js
-        loaderDiv.style.display = 'none';
-        threeDiv.style.display = 'block';
-        
-        // Afficher l'interface FPS
+    /**
+     * Révèle la scène 3D et masque le loader.
+     * À appeler UNIQUEMENT après que le modèle GLTF soit complètement chargé.
+     */
+    public revealScene(): void {
+        const loaderDiv = document.getElementById('loading-screen');
+        const threeDiv = document.getElementById('three-container');
         const fpsUI = document.getElementById('fps-ui');
+
+        if (loaderDiv) loaderDiv.style.display = 'none';
+        if (threeDiv) threeDiv.style.display = 'block';
         if (fpsUI) fpsUI.style.display = 'block';
     }
 }

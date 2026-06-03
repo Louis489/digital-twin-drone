@@ -6,7 +6,6 @@ import { EXRLoader } from 'three/examples/jsm/loaders/EXRLoader.js';
 import { Octree } from 'three/examples/jsm/math/Octree.js';
 import { Capsule } from 'three/examples/jsm/math/Capsule.js';
 import droneModelUrl from '../../assets/drone.glb?url';
-import shipModelUrl from '../../assets/ship.glb?url';
 import skyExrUrl from '../../assets/sky.exr?url';
 import turbineModelUrl from '../../assets/turbine.glb?url';
 import windTurbineModelUrl from '../../assets/wind_turbine.glb?url';
@@ -293,6 +292,28 @@ this.camera.updateProjectionMatrix(); // Indispensable pour valider le changemen
         return new Promise((resolve, reject) => {
             const loader = new GLTFLoader();
             console.log("⏳ [DEBUG SHIP] Tentative de chargement du bateau depuis :", url);
+            console.log("⏳ [DEBUG SHIP] Taille estimée: ~86 MB, cela peut prendre du temps...");
+
+            // Timeout de sécurité: 2 minutes pour un fichier de 86MB
+            const timeoutId = setTimeout(() => {
+                console.error("❌ [DEBUG SHIP] TIMEOUT: Le chargement a pris plus de 2 minutes");
+                reject(new Error("Timeout: Le chargement du bateau a pris trop de temps"));
+            }, 120000);
+
+            // Flag pour éviter le double resolve/reject
+            let isCompleted = false;
+
+            const onComplete = (result: THREE.Group | Error) => {
+                if (isCompleted) return;
+                isCompleted = true;
+                clearTimeout(timeoutId);
+                
+                if (result instanceof Error) {
+                    reject(result);
+                } else {
+                    resolve(result);
+                }
+            };
 
             loader.load(
                 url,
@@ -331,24 +352,38 @@ this.camera.updateProjectionMatrix(); // Indispensable pour valider le changemen
                     this.worldOctree.fromGraphNode(this.shipModel);
                     console.log("🧱 Collisions générées avec succès !");
                     
-                    resolve(this.shipModel);
+                    onComplete(this.shipModel);
                 },
                 (xhr: ProgressEvent) => {
                     // Mise à jour de la barre de progression dans le DOM
+                    const textEl = document.getElementById('model-loading-text');
+                    const barEl = document.getElementById('model-loading-bar');
+                    
                     if (xhr.lengthComputable) {
                         const percentComplete = Math.round((xhr.loaded / xhr.total) * 100);
-                        console.log(`⏳ [DEBUG SHIP] Chargement : ${percentComplete}%`);
+                        const loadedMB = (xhr.loaded / 1024 / 1024).toFixed(1);
+                        const totalMB = (xhr.total / 1024 / 1024).toFixed(1);
+                        console.log(`⏳ [DEBUG SHIP] Chargement : ${percentComplete}% (${loadedMB}/${totalMB} MB)`);
 
-                        const textEl = document.getElementById('model-loading-text');
-                        const barEl = document.getElementById('model-loading-bar');
-
-                        if (textEl) textEl.innerText = `Chargement des assets 3D: ${percentComplete}%`;
+                        if (textEl) textEl.innerText = `Chargement: ${percentComplete}% (${loadedMB}/${totalMB} MB)`;
                         if (barEl) barEl.style.width = `${percentComplete}%`;
+                    } else {
+                        // Quand le serveur ne donne pas la taille totale (dev server)
+                        // On affiche juste les bytes chargés avec une animation
+                        const loadedMB = (xhr.loaded / 1024 / 1024).toFixed(2);
+                        console.log(`⏳ [DEBUG SHIP] Chargement : ${loadedMB} MB chargés...`);
+                        
+                        if (textEl) textEl.innerText = `Chargement: ${loadedMB} MB...`;
+                        // Animation pulsante quand on ne sait pas la progression totale
+                        if (barEl) {
+                            barEl.style.width = '100%';
+                            barEl.style.animation = 'pulse 1s infinite';
+                        }
                     }
                 },
                 (error) => {
                     console.error("❌ [DEBUG SHIP] Erreur CRITIQUE de chargement :", error);
-                    reject(error);
+                    onComplete(error instanceof Error ? error : new Error(String(error)));
                 }
             );
         });
