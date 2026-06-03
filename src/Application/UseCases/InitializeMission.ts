@@ -140,7 +140,7 @@ export class InitializeMission {
         const defaultWeatherPOI: POIProperties = {
           title: 'Dashboard Météo',
           description: 'Visualisation des vents et données océanographiques en temps réel. Analyse des courants marins et prévisions météo.',
-          imageUrl: 'https://via.placeholder.com/400x250/001a33/00e5ff?text=Dashboard+Meteo',
+          imageUrl: '', // Image supprimée pour éviter l'erreur réseau
           targetId: 'meteo-dashboard',
           isPOI: true
         };

@@ -275,11 +275,11 @@ this.camera.updateProjectionMatrix(); // Indispensable pour valider le changemen
             this.loadTurbine();
         });
 
-        // Chargement du navire principal - déplacé dans une méthode avec Promise
-        this.loadShipModel(shipModelUrl);
-        
         // Configuration des contrôles FPS
         this.setupFPSControls();
+        
+        // NOTE: Le chargement du navire est maintenant géré explicitement via loadShipModel()
+        // dans main.ts avec await, pour garantir la synchronisation de la transition
     }
 
     /**

@@ -231,19 +231,11 @@
     </style>
   </head>
   <body>
-    <!-- Écran de chargement (Splash Screen) -->
+    <!-- Écran de chargement initial (Splash Screen) -->
     <div id="loading-overlay" style="display: flex; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: #0a0e1a; z-index: 9999; flex-direction: column; align-items: center; justify-content: center; font-family: 'Segoe UI', Arial, sans-serif;">
       <div style="width: 60px; height: 60px; border: 3px solid rgba(0, 210, 255, 0.2); border-top-color: #00d2ff; border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 20px;"></div>
       <div style="color: #00d2ff; font-size: 18px; font-weight: 600; letter-spacing: 1px;">Initialisation du Jumeau Numérique...</div>
       <div style="color: rgba(0, 210, 255, 0.6); font-size: 14px; margin-top: 10px;">Chargement des assets 3D</div>
-      
-      <!-- Barre de progression pour le modèle 3D -->
-      <div id="model-loading-container" style="width: 80%; max-width: 400px; margin: 20px auto; text-align: center; display: none;">
-        <div style="color: #00d2ff; font-family: monospace; font-size: 16px; margin-bottom: 8px;" id="model-loading-text">Chargement des assets 3D: 0%</div>
-        <div style="width: 100%; height: 6px; background: rgba(255,255,255,0.1); border-radius: 4px; overflow: hidden; border: 1px solid rgba(0, 210, 255, 0.3);">
-          <div id="model-loading-bar" style="width: 0%; height: 100%; background: #00d2ff; transition: width 0.1s ease-out;"></div>
-        </div>
-      </div>
     </div>
 
     <div id="main-control-panel">
@@ -330,9 +322,18 @@
     <div id="app">
         <div id="cesium-container" style="width: 100vw; height: 100vh;"></div>
         
-        <div id="loading-screen" style="display: none; position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; background: #000; color: #fff; z-index: 1000; flex-direction: column; justify-content: center; align-items: center; font-family: sans-serif;">
-            <h2>Génération du Jumeau Numérique...</h2>
-            <p>Chargement de l'environnement naval</p>
+        <div id="loading-screen" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: #0a0e1a; color: #fff; z-index: 9998; flex-direction: column; justify-content: center; align-items: center; font-family: 'Segoe UI', Arial, sans-serif;">
+            <div style="width: 60px; height: 60px; border: 3px solid rgba(0, 210, 255, 0.2); border-top-color: #00d2ff; border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 20px;"></div>
+            <h2 style="color: #00d2ff; font-size: 18px; font-weight: 600; letter-spacing: 1px; margin-bottom: 10px;">Génération du Jumeau Numérique...</h2>
+            <p style="color: rgba(0, 210, 255, 0.6); font-size: 14px; margin-bottom: 20px;">Chargement de l'environnement naval</p>
+            
+            <!-- Barre de progression pour le modèle 3D -->
+            <div id="model-loading-container" style="width: 80%; max-width: 400px; margin: 20px auto; text-align: center; display: block;">
+                <div style="color: #00d2ff; font-family: monospace; font-size: 16px; margin-bottom: 8px;" id="model-loading-text">Chargement des assets 3D: 0%</div>
+                <div style="width: 100%; height: 6px; background: rgba(255,255,255,0.1); border-radius: 4px; overflow: hidden; border: 1px solid rgba(0, 210, 255, 0.3);">
+                    <div id="model-loading-bar" style="width: 0%; height: 100%; background: #00d2ff; transition: width 0.1s ease-out;"></div>
+                </div>
+            </div>
         </div>
 
         <div id="three-container" style="display: none; width: 100vw; height: 100vh;"></div>

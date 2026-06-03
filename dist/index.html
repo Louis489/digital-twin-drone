@@ -229,7 +229,7 @@
         }
       }
     </style>
-    <script type="module" crossorigin src="/digital-twin-drone/assets/index-Cv0aOp6q.js"></script>
+    <script type="module" crossorigin src="/digital-twin-drone/assets/index-BzglSSWn.js"></script>
     <link rel="stylesheet" crossorigin href="/digital-twin-drone/assets/index-DqkSn5WT.css">
   </head>
   <body>
@@ -238,6 +238,14 @@
       <div style="width: 60px; height: 60px; border: 3px solid rgba(0, 210, 255, 0.2); border-top-color: #00d2ff; border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 20px;"></div>
       <div style="color: #00d2ff; font-size: 18px; font-weight: 600; letter-spacing: 1px;">Initialisation du Jumeau Numérique...</div>
       <div style="color: rgba(0, 210, 255, 0.6); font-size: 14px; margin-top: 10px;">Chargement des assets 3D</div>
+      
+      <!-- Barre de progression pour le modèle 3D -->
+      <div id="model-loading-container" style="width: 80%; max-width: 400px; margin: 20px auto; text-align: center; display: none;">
+        <div style="color: #00d2ff; font-family: monospace; font-size: 16px; margin-bottom: 8px;" id="model-loading-text">Chargement des assets 3D: 0%</div>
+        <div style="width: 100%; height: 6px; background: rgba(255,255,255,0.1); border-radius: 4px; overflow: hidden; border: 1px solid rgba(0, 210, 255, 0.3);">
+          <div id="model-loading-bar" style="width: 0%; height: 100%; background: #00d2ff; transition: width 0.1s ease-out;"></div>
+        </div>
+      </div>
     </div>
 
     <div id="main-control-panel">
@@ -331,6 +339,11 @@
 
         <div id="three-container" style="display: none; width: 100vw; height: 100vh;"></div>
         <div id="fps-ui" style="display: none;">
+            <!-- Bouton Retour au Globe -->
+            <button id="btn-return-globe" style="position: absolute; top: 20px; left: 50%; transform: translateX(-50%); z-index: 1002; padding: 12px 24px; background: rgba(0, 40, 60, 0.7); border: 1px solid #00d2ff; border-radius: 8px; color: #00d2ff; font-family: monospace; font-size: 14px; font-weight: 600; cursor: pointer; text-shadow: 0 0 5px rgba(0, 210, 255, 0.5); box-shadow: 0 0 15px rgba(0, 210, 255, 0.3); pointer-events: auto; transition: all 0.3s ease; backdrop-filter: blur(5px);">
+                 RETOUR AU GLOBE
+            </button>
+            
             <div style="position: absolute; top: 50%; left: 50%; width: 4px; height: 4px; background: white; border-radius: 50%; transform: translate(-50%, -50%); z-index: 1001; pointer-events: none;"></div>
             <div id="blocker" style="position: absolute; width: 100vw; height: 100vh; background-color: rgba(0,0,0,0.5); z-index: 1000; display: flex; flex-direction: column; justify-content: center; align-items: center; color: white; font-family: sans-serif; cursor: pointer;">
                 <h2>Cliquez pour explorer le navire</h2>
