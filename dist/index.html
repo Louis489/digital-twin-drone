@@ -9,6 +9,54 @@
         margin: 0;
         overflow: hidden;
       }
+      #btn-return-hub:hover {
+        background: linear-gradient(135deg, rgba(0, 216, 255, 0.35), rgba(0, 168, 255, 0.25)) !important;
+        border-color: rgba(0, 216, 255, 0.8) !important;
+        box-shadow: 0 6px 20px rgba(0, 216, 255, 0.3) !important;
+        transform: translateY(-2px);
+      }
+      #btn-return-hub:active {
+        transform: translateY(0) !important;
+      }
+      
+      /* Menu Météo Custom - Glassmorphism */
+      .weather-controls.custom-leaflet-menu {
+        position: absolute;
+        top: 20px;
+        right: 20px;
+        z-index: 1000;
+        background: rgba(10, 15, 25, 0.85);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid #00d2ff;
+        color: white;
+        padding: 15px 18px;
+        border-radius: 10px;
+        font-family: 'Segoe UI', Arial, sans-serif;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 20px rgba(0, 210, 255, 0.15);
+        min-width: 200px;
+      }
+      
+      /* Popups Leaflet - Thème sombre */
+      .leaflet-popup-content-wrapper {
+        background: rgba(10, 15, 25, 0.95) !important;
+        backdrop-filter: blur(10px);
+        color: white !important;
+        border: 1px solid #00d2ff;
+        border-radius: 8px;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+        font-family: 'Segoe UI', Arial, sans-serif;
+      }
+      
+      .leaflet-popup-tip {
+        background: rgba(10, 15, 25, 0.95) !important;
+        border: 1px solid #00d2ff;
+      }
+      
+      .leaflet-popup-content {
+        margin: 12px 14px !important;
+        color: white !important;
+      }
       #canvas-container {
         width: 100vw;
         height: 100vh;
@@ -162,11 +210,36 @@
       #main-control-panel strong {
         color: #00e5ff;
       }
+      
+      /* Animation du spinner de chargement */
+      @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+      
+      /* Animation clignotante pour le bouton d'urgence */
+      @keyframes pulse-warning {
+        0%, 100% { 
+          box-shadow: 0 0 20px rgba(255, 69, 0, 0.6);
+          transform: scale(1);
+        }
+        50% { 
+          box-shadow: 0 0 30px rgba(255, 69, 0, 0.9);
+          transform: scale(1.02);
+        }
+      }
     </style>
-    <script type="module" crossorigin src="/digital-twin-drone/assets/index-CfKZ7OzS.js"></script>
-    <link rel="stylesheet" crossorigin href="/digital-twin-drone/assets/index-CGNOqgEs.css">
+    <script type="module" crossorigin src="/digital-twin-drone/assets/index-Cv0aOp6q.js"></script>
+    <link rel="stylesheet" crossorigin href="/digital-twin-drone/assets/index-DqkSn5WT.css">
   </head>
   <body>
+    <!-- Écran de chargement (Splash Screen) -->
+    <div id="loading-overlay" style="display: flex; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: #0a0e1a; z-index: 9999; flex-direction: column; align-items: center; justify-content: center; font-family: 'Segoe UI', Arial, sans-serif;">
+      <div style="width: 60px; height: 60px; border: 3px solid rgba(0, 210, 255, 0.2); border-top-color: #00d2ff; border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 20px;"></div>
+      <div style="color: #00d2ff; font-size: 18px; font-weight: 600; letter-spacing: 1px;">Initialisation du Jumeau Numérique...</div>
+      <div style="color: rgba(0, 210, 255, 0.6); font-size: 14px; margin-top: 10px;">Chargement des assets 3D</div>
+    </div>
+
     <div id="main-control-panel">
         <h3>DATA OCEANO & WEATHER</h3>
         <div class="panel-separator"></div>
@@ -216,6 +289,7 @@
         <div class="panel-separator"></div>
         <div class="panel-section">
             <div class="section-title">WEATHER LAYERS</div>
+            <input type="text" id="weather-api-key" placeholder="Clé API OpenWeatherMap" style="width: 100%; box-sizing: border-box; padding: 6px 8px; font-size: 12px; background: rgba(0, 30, 50, 0.82); border: 1px solid rgba(0, 216, 255, 0.35); border-radius: 5px; color: #dffcff; outline: none; margin-bottom: 5px;">
             <div class="weather-layer-list">
                 <label class="weather-layer-option">
                     <input type="radio" name="weather-layer" value="wind">
@@ -273,6 +347,37 @@
                 <div>PROFONDEUR: <span id="data-depth">25.30</span> m</div>
                 <div>TEMPÉRATURE: <span id="data-temp">-2.11</span> °C</div>
                 <div style="margin-top: 10px; height: 2px; background: linear-gradient(90deg, #00aaaa, transparent); width: 100%;" id="data-bar"></div>
+            </div>
+        </div>
+
+        <!-- Dashboard Météo 2D (Leaflet) -->
+        <div id="weather-map-container" style="display: none; position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 50; background-color: #0b0f19;">
+            <button id="btn-return-hub" style="position: absolute; top: 20px; left: 20px; z-index: 1000; padding: 12px 24px; background: linear-gradient(135deg, rgba(0, 216, 255, 0.2), rgba(0, 168, 255, 0.15)); border: 1px solid rgba(0, 216, 255, 0.5); border-radius: 8px; color: #00e5ff; font-size: 14px; font-weight: 600; font-family: 'Segoe UI', Arial, sans-serif; cursor: pointer; transition: all 0.25s ease; display: flex; align-items: center; gap: 8px; pointer-events: auto; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);">
+                <span style="font-size: 18px;">⬅</span> Retour au Hub
+            </button>
+            
+            <!-- Menu Custom Calques Météo -->
+            <div id="weather-layers-menu" class="weather-controls custom-leaflet-menu">
+                <div style="font-size: 13px; font-weight: 700; margin-bottom: 12px; color: #00d2ff; text-transform: uppercase; letter-spacing: 1px; border-bottom: 1px solid rgba(0, 210, 255, 0.3); padding-bottom: 8px;">
+                    📊 Calques Météo
+                </div>
+                <label style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px; cursor: pointer; user-select: none;">
+                    <input type="checkbox" id="toggle-temp-layer" style="cursor: pointer; width: 16px; height: 16px;">
+                    <span style="font-size: 14px;">🌡️ Température</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 10px; margin-bottom: 15px; cursor: pointer; user-select: none;">
+                    <input type="checkbox" id="toggle-wind-layer" style="cursor: pointer; width: 16px; height: 16px;">
+                    <span style="font-size: 14px;">💨 Vent Dynamique</span>
+                </label>
+                
+                <div style="border-top: 1px solid rgba(139, 69, 19, 0.4); padding-top: 12px; margin-top: 5px;">
+                    <div style="font-size: 11px; font-weight: 600; margin-bottom: 8px; color: rgba(210, 105, 30, 0.9); text-transform: uppercase; letter-spacing: 0.5px;">
+                        ⚠️ Simulation Urgence
+                    </div>
+                    <button id="btn-simulate-spill" style="width: 100%; padding: 10px 12px; background: linear-gradient(135deg, rgba(139, 69, 19, 0.3), rgba(160, 82, 45, 0.2)); border: 1px solid rgba(139, 69, 19, 0.6); border-radius: 6px; color: #deb887; font-size: 13px; font-weight: 600; font-family: 'Segoe UI', Arial, sans-serif; cursor: pointer; transition: all 0.25s ease; display: flex; align-items: center; justify-content: center; gap: 6px;">
+                        <span>⚠️</span> Simuler Marée Noire
+                    </button>
+                </div>
             </div>
         </div>
     </div>

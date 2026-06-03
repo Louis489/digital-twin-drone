@@ -46,11 +46,19 @@ function startTelemetryReplay(): void {
       const depthElement = document.getElementById('data-depth');
       const tempElement = document.getElementById('data-temp');
       
-      replay.setOnTelemetryUpdate((point) => {
-        // MISE À JOUR DE L'UI
-        if (depthElement) depthElement.innerText = Number(point.depth).toFixed(2);
-        if (tempElement) tempElement.innerText = Number(point.temp).toFixed(2);
-      });
+      // VALEURS FIXES - Stabilisation de la télémétrie
+      const FIXED_DEPTH = 50.00;
+      const FIXED_TEMP = 10.75;
+      
+      // Mise à jour unique au démarrage
+      if (depthElement) depthElement.innerText = FIXED_DEPTH.toFixed(2);
+      if (tempElement) tempElement.innerText = FIXED_TEMP.toFixed(2);
+      
+      // Désactiver les mises à jour dynamiques pour stabiliser l'affichage
+      // replay.setOnTelemetryUpdate((point) => {
+      //   if (depthElement) depthElement.innerText = Number(point.depth).toFixed(2);
+      //   if (tempElement) tempElement.innerText = Number(point.temp).toFixed(2);
+      // });
       
       replay.start();
     })
@@ -111,6 +119,32 @@ function setupReturnHubButton(): void {
     }
     
     // Retour au Hub
+    loadGlobeScene();
+  });
+}
+
+function setupReturnToGlobeButton(): void {
+  const returnGlobeBtn = document.getElementById('btn-return-globe');
+  if (!returnGlobeBtn) return;
+  
+  returnGlobeBtn.addEventListener('click', () => {
+    console.log('[Main] Retour au Globe depuis la scène 3D');
+    
+    // 1. Mettre la simulation 3D en pause pour économiser les ressources
+    if (threeShipService) {
+      threeShipService.deactivateSimulation();
+    }
+    
+    // 2. Masquer la scène 3D et son UI
+    const threeDiv = document.getElementById('three-container');
+    const fpsUI = document.getElementById('fps-ui');
+    if (threeDiv) threeDiv.style.display = 'none';
+    if (fpsUI) fpsUI.style.display = 'none';
+    
+    // 3. Réafficher Cesium
+    if (cesiumContainer) cesiumContainer.style.display = 'block';
+    
+    // 4. Retour au Hub Globe
     loadGlobeScene();
   });
 }
@@ -222,12 +256,26 @@ async function loadGlobeScene(): Promise<void> {
       console.log(`Redirection vers ${targetId}`);
       
       if (targetId === 'scene-3d') {
+        // Afficher l'écran de chargement avec la barre de progression
+        const loadingScreen = document.getElementById('loading-screen');
+        const loadingContainer = document.getElementById('model-loading-container');
+        if (loadingScreen) loadingScreen.style.display = 'flex';
+        if (loadingContainer) loadingContainer.style.display = 'block';
+        
         poiHubService?.destroy();
         poiHubService = null;
         await startMissionUseCase.execute();
+        
+        // Attendre que le bateau soit complètement chargé avant de continuer
         if (threeShipService) {
+          await threeShipService.loadShipModel('/src/assets/ship.glb');
           threeShipService.activateSimulation();
         }
+        
+        // Masquer l'écran de chargement une fois tout chargé
+        if (loadingScreen) loadingScreen.style.display = 'none';
+        if (loadingContainer) loadingContainer.style.display = 'none';
+        
         startTelemetryReplay();
       } else if (targetId === 'meteo-dashboard') {
         // Transition vers le Dashboard Météo 2D
@@ -310,6 +358,7 @@ async function loadGlobeScene(): Promise<void> {
 async function init(): Promise<void> {
   setupBackButton();
   setupReturnHubButton();
+  setupReturnToGlobeButton();
   
   // Initialisation de la scène Three.js (masquée au départ)
   threeShipService = new ThreeShipService('three-container');

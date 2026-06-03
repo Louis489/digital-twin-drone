@@ -6,7 +6,6 @@
  * @version 1.0.0
  */
 
-import { Deck } from '@deck.gl/core';
 import { HeatmapLayer } from '@deck.gl/aggregation-layers';
 import { LeafletLayer } from "deck.gl-leaflet";
 import * as L from 'leaflet';

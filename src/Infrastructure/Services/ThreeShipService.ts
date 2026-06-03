@@ -275,63 +275,91 @@ this.camera.updateProjectionMatrix(); // Indispensable pour valider le changemen
             this.loadTurbine();
         });
 
-        // Chargement du navire principal
-        const loader = new GLTFLoader();
-        // Chargement du navire principal avec traçage complet
-        console.log("⏳ [DEBUG SHIP] Tentative de chargement du bateau depuis :", shipModelUrl);
+        // Chargement du navire principal - déplacé dans une méthode avec Promise
+        this.loadShipModel(shipModelUrl);
+        
+        // Configuration des contrôles FPS
+        this.setupFPSControls();
+    }
 
-        loader.load(
-            shipModelUrl,
-            (gltf) => {
-                console.log("✅ [DEBUG SHIP] Fichier GLB téléchargé et parsé !");
-                
-                // 1. Création d'un groupe parent (le wrapper magique)
-                this.shipModel = new THREE.Group();
-                
-                // 2. On ajoute la scène du GLTF dans notre groupe
-                this.shipModel.add(gltf.scene);
-                
-                this.shipModel.scale.set(50, 50, 50); 
-                
-                // --- POSITIONNEMENT FINAL "GOD MODE" ---
-                // On descend le bateau drastiquement (Y=-120) pour que la caméra soit sur le pont
-                // On le centre sur la caméra (X=0, Z=0)
-                this.shipModel.position.set(-80, -80, -80); 
-                
-                // --- OPTIMISATION REFLETS EXR ---
-                this.shipModel.traverse((child) => {
-                    if ((child as THREE.Mesh).isMesh) {
-                        const mesh = child as THREE.Mesh;
-                        if (mesh.material) {
-                            const mat = mesh.material as THREE.MeshStandardMaterial;
-                            mat.envMapIntensity = 1.0; // Ajuster entre 0.5 et 1.5 selon le rendu
-                            mat.metalness = 0.8; // Pour que la rouille et le métal brillent proprement
-                            mat.roughness = 0.2; 
-                            mat.needsUpdate = true;
+    /**
+     * @method loadShipModel
+     * @public
+     * @param {string} url - URL du modèle GLTF à charger
+     * @returns {Promise<THREE.Group>} Promise qui résout quand le bateau est chargé
+     * @description Charge le modèle du navire avec suivi de progression et retourne une Promise.
+     */
+    public loadShipModel(url: string): Promise<THREE.Group> {
+        return new Promise((resolve, reject) => {
+            const loader = new GLTFLoader();
+            console.log("⏳ [DEBUG SHIP] Tentative de chargement du bateau depuis :", url);
+
+            loader.load(
+                url,
+                (gltf) => {
+                    console.log("✅ [DEBUG SHIP] Fichier GLB téléchargé et parsé !");
+                    
+                    // 1. Création d'un groupe parent (le wrapper magique)
+                    this.shipModel = new THREE.Group();
+                    
+                    // 2. On ajoute la scène du GLTF dans notre groupe
+                    this.shipModel.add(gltf.scene);
+                    
+                    this.shipModel.scale.set(50, 50, 50); 
+                    
+                    // --- POSITIONNEMENT FINAL "GOD MODE" ---
+                    this.shipModel.position.set(-80, -80, -80); 
+                    
+                    // --- OPTIMISATION REFLETS EXR ---
+                    this.shipModel.traverse((child) => {
+                        if ((child as THREE.Mesh).isMesh) {
+                            const mesh = child as THREE.Mesh;
+                            if (mesh.material) {
+                                const mat = mesh.material as THREE.MeshStandardMaterial;
+                                mat.envMapIntensity = 1.0;
+                                mat.metalness = 0.8;
+                                mat.roughness = 0.2; 
+                                mat.needsUpdate = true;
+                            }
                         }
+                    });
+
+                    this.vesselFrame.add(this.shipModel);
+                    console.log("🚢 [DEBUG SHIP] Bateau ajouté à la scène 3D !");
+                    
+                    // On donne le modèle à l'Octree pour générer les collisions
+                    this.worldOctree.fromGraphNode(this.shipModel);
+                    console.log("🧱 Collisions générées avec succès !");
+                    
+                    resolve(this.shipModel);
+                },
+                (xhr: ProgressEvent) => {
+                    // Mise à jour de la barre de progression dans le DOM
+                    if (xhr.lengthComputable) {
+                        const percentComplete = Math.round((xhr.loaded / xhr.total) * 100);
+                        console.log(`⏳ [DEBUG SHIP] Chargement : ${percentComplete}%`);
+
+                        const textEl = document.getElementById('model-loading-text');
+                        const barEl = document.getElementById('model-loading-bar');
+
+                        if (textEl) textEl.innerText = `Chargement des assets 3D: ${percentComplete}%`;
+                        if (barEl) barEl.style.width = `${percentComplete}%`;
                     }
-                });
-
-                this.vesselFrame.add(this.shipModel);
-                console.log("🚢 [DEBUG SHIP] Bateau ajouté à la scène 3D !");
-                
-                // On donne le modèle à l'Octree pour générer les collisions
-                this.worldOctree.fromGraphNode(this.shipModel);
-                console.log("🧱 Collisions générées avec succès !");
-            },
-            (xhr) => {
-                // Si le serveur donne la taille totale, on affiche le pourcentage
-                if (xhr.total > 0) {
-                    console.log(`⏳ [DEBUG SHIP] Chargement : ${Math.round((xhr.loaded / xhr.total) * 100)}%`);
-                } else {
-                    console.log(`⏳ [DEBUG SHIP] Chargement : ${xhr.loaded} octets reçus...`);
+                },
+                (error) => {
+                    console.error("❌ [DEBUG SHIP] Erreur CRITIQUE de chargement :", error);
+                    reject(error);
                 }
-            },
-            (error) => {
-                console.error("❌ [DEBUG SHIP] Erreur CRITIQUE de chargement :", error);
-            }
-        );
+            );
+        });
+    }
 
+    /**
+     * @method setupFPSControls
+     * @private
+     * @description Configure les contrôles FPS (PointerLockControls).
+     */
+    private setupFPSControls(): void {
         // 4. Contrôles FPS (PointerLockControls)
         this.syncCameraWithPlayerCollider();
         this.camera.lookAt(PLAYER_LOOK_AT_POSITION);
@@ -803,6 +831,8 @@ this.camera.updateProjectionMatrix(); // Indispensable pour valider le changemen
         }
 
         // --- GESTION DE LA VIDÉO HUD ---
+        // Le PIP est maintenant indépendant du mode AR X-Ray
+        // Il sera créé une seule fois et restera toujours visible
         let videoContainer = document.getElementById('rov-video-hud');
         
         // Création du conteneur s'il n'existe pas encore
@@ -821,6 +851,7 @@ this.camera.updateProjectionMatrix(); // Indispensable pour valider le changemen
             videoContainer.style.boxShadow = '0 0 15px rgba(0, 255, 204, 0.3)';
             videoContainer.style.overflow = 'hidden';
             videoContainer.style.transition = 'opacity 0.3s ease-in-out';
+            videoContainer.style.display = 'none'; // Masqué par défaut, visible uniquement en mode X-Ray
             
             // Structure interne : Vidéo (placeholder pour l'instant) + Badge Texte
             videoContainer.innerHTML = `
@@ -831,15 +862,20 @@ this.camera.updateProjectionMatrix(); // Indispensable pour valider le changemen
                 <style>@keyframes blink { 0% { opacity: 1; } 50% { opacity: 0; } 100% { opacity: 1; } }</style>
             `;
             document.body.appendChild(videoContainer);
+            setTimeout(() => { if(videoContainer) videoContainer.style.opacity = '1'; }, 10);
         }
 
-        // Affichage ou masquage selon l'état du mode AR
-        if (isActive) {
-            videoContainer.style.display = 'block';
-            setTimeout(() => { if(videoContainer) videoContainer.style.opacity = '1'; }, 10);
-        } else {
-            videoContainer.style.opacity = '0';
-            setTimeout(() => { if(videoContainer) videoContainer.style.display = 'none'; }, 300);
+        // Gestion de la visibilité du PIP selon le mode Rayon X
+        if (videoContainer) {
+            if (isActive) {
+                // Mode Rayon X activé : afficher le PIP
+                videoContainer.style.display = 'block';
+                setTimeout(() => { videoContainer.style.opacity = '1'; }, 10);
+            } else {
+                // Mode Rayon X désactivé : masquer le PIP
+                videoContainer.style.opacity = '0';
+                setTimeout(() => { videoContainer.style.display = 'none'; }, 300);
+            }
         }
 
         // 5. Transformer le drone en Hologramme
@@ -1500,8 +1536,12 @@ this.camera.updateProjectionMatrix(); // Indispensable pour valider le changemen
         }
 
         // --- 3. RENDU CAMÉRA SECONDAIRE (ROV HUD) ---
-        // Si la caméra ROV est active (Mode AR On)
-        if (this.rovCamera && this.isARModeVRActive) {
+        // Le PIP est lié au mode Rayon X - visible uniquement quand X-Ray est actif
+        const hud = document.getElementById('rov-video-hud');
+        const isPIPVisible = hud && hud.style.display !== 'none';
+        
+        // Rendu PIP seulement si mode X-Ray actif (VR ou desktop)
+        if (this.rovCamera && (this.isARModeVRActive || isPIPVisible)) {
             const rovWorldPos = new THREE.Vector3();
             this.rovCamera.getWorldPosition(rovWorldPos);
 
@@ -1537,30 +1577,30 @@ this.camera.updateProjectionMatrix(); // Indispensable pour valider le changemen
                 this.camera.getWorldPosition(headWorldPos);
                 this.setAtmosphereForHeight(headWorldPos.y);
 
-            } else {
+            } else if (isPIPVisible) {
                 // --- SUR ÉCRAN PC : Rendu classique en Picture-in-Picture HTML ---
+                // Fonctionne même en mode AR X-Ray (la transparence du bateau n'affecte pas le rendu)
                 if (this.vrMonitorMesh) this.vrMonitorMesh.visible = false;
                 if (this.cockpitOverlay) this.cockpitOverlay.visible = false;
 
-                const hud = document.getElementById('rov-video-hud');
-                if (hud && hud.style.display !== 'none') {
-                    this.renderer.clearDepth();
-                    this.setAtmosphereForHeight(rovWorldPos.y);
+                this.renderer.clearDepth();
+                this.setAtmosphereForHeight(rovWorldPos.y);
 
-                    const pipWidth = 600;
-                    const pipHeight = 340;
-                    const pipX = 20;
-                    const pipY = window.innerHeight - pipHeight - 20;
+                const pipWidth = 600;
+                const pipHeight = 340;
+                const pipX = 20;
+                const pipY = window.innerHeight - pipHeight - 20;
 
-                    this.renderer.setViewport(pipX, pipY, pipWidth, pipHeight);
-                    this.renderer.setScissor(pipX, pipY, pipWidth, pipHeight);
-                    this.renderer.setScissorTest(true);
+                this.renderer.setViewport(pipX, pipY, pipWidth, pipHeight);
+                this.renderer.setScissor(pipX, pipY, pipWidth, pipHeight);
+                this.renderer.setScissorTest(true);
 
-                    this.renderer.render(this.scene, this.rovCamera);
-                }
+                // CORRECTION : Sauvegarder l'état de la scène pour éviter les effets de bord
+                // Le PIP doit toujours voir la scène normalement, même avec le bateau transparent
+                this.renderer.render(this.scene, this.rovCamera);
             }
         } else {
-            // Si le mode AR est désactivé, on cache l'écran VR et le cockpit
+            // Si le mode AR VR est désactivé et PIP masqué, on cache l'écran VR et le cockpit
             if (this.vrMonitorMesh) this.vrMonitorMesh.visible = false;
             if (this.cockpitOverlay) this.cockpitOverlay.visible = false;
         }
