@@ -86,10 +86,13 @@ function showWeatherDashboard(): void {
   const mainControlPanel = document.getElementById('main-control-panel');
   const hubOverlay = document.getElementById('hub-overlay');
   const poiPanel = document.getElementById('poi-side-panel');
+  const togglePanelBtn = document.getElementById('toggle-panel-btn');
   
   if (mainControlPanel) mainControlPanel.style.display = 'none';
   if (hubOverlay) hubOverlay.style.display = 'none';
   if (poiPanel) poiPanel.style.display = 'none';
+  // Le bouton de repli n'a de sens que sur le globe
+  if (togglePanelBtn) togglePanelBtn.style.display = 'none';
   if (cesiumContainer) cesiumContainer.style.display = 'none';
   
   // Fermer le panneau POI
@@ -147,6 +150,23 @@ function setupReturnToGlobeButton(): void {
     
     // 4. Retour au Hub Globe
     loadGlobeScene();
+  });
+}
+
+function setupTogglePanelButton(): void {
+  const controlPanel = document.getElementById('main-control-panel');
+  const toggleBtn = document.getElementById('toggle-panel-btn');
+  if (!controlPanel || !toggleBtn) return;
+
+  const iconSpan = toggleBtn.querySelector('span');
+
+  toggleBtn.addEventListener('click', () => {
+    const isCollapsed = controlPanel.classList.toggle('collapsed');
+    // Le bouton suit l'état du panneau pour glisser au bord de l'écran
+    toggleBtn.classList.toggle('collapsed', isCollapsed);
+
+    // Met à jour la flèche visuellement
+    if (iconSpan) iconSpan.textContent = isCollapsed ? '▶' : '◀';
   });
 }
 
@@ -221,12 +241,24 @@ async function loadGlobeScene(): Promise<void> {
   const threeDiv = document.getElementById('three-container');
   const fpsUI = document.getElementById('fps-ui');
   const poiPanel = document.getElementById('poi-side-panel');
+  const togglePanelBtn = document.getElementById('toggle-panel-btn');
   
-  if (mainControlPanel) mainControlPanel.style.display = 'block';
+  if (mainControlPanel) {
+    mainControlPanel.style.display = 'block';
+    // Réinitialiser l'état replié au retour sur le globe
+    mainControlPanel.classList.remove('collapsed');
+  }
   if (hubOverlay) hubOverlay.style.display = 'flex';
   if (threeDiv) threeDiv.style.display = 'none';
   if (fpsUI) fpsUI.style.display = 'none';
   if (poiPanel) poiPanel.style.display = 'block';
+  // Le bouton de repli n'est visible que sur le globe
+  if (togglePanelBtn) {
+    togglePanelBtn.style.display = 'flex';
+    togglePanelBtn.classList.remove('collapsed');
+    const icon = togglePanelBtn.querySelector('span');
+    if (icon) icon.textContent = '◀';
+  }
   
   // Afficher le conteneur Cesium
   cesiumContainer.style.display = 'block';
@@ -384,6 +416,7 @@ async function init(): Promise<void> {
   setupBackButton();
   setupReturnHubButton();
   setupReturnToGlobeButton();
+  setupTogglePanelButton();
   
   // Initialisation de la scène Three.js (masquée au départ)
   threeShipService = new ThreeShipService('three-container');

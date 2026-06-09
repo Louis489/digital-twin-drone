@@ -121,7 +121,6 @@ export class CesiumMapService implements IMapService {
 
     const labelText = (options.name ?? 'Point').toUpperCase();
     const pointColor = this.parseColor(options.color ?? '#ff0000');
-    const isWeather = (options.color ?? '').toLowerCase() === '#00e5ff';
 
     const entity = this.viewer.entities.add({
       id: entityId,
@@ -131,29 +130,25 @@ export class CesiumMapService implements IMapService {
         position.altitude ?? 0
       ),
       point: {
-        pixelSize: options.pixelSize ?? 18,
+        pixelSize: options.pixelSize ?? 18, // Plus grand pour un effet de cible
         color: pointColor,
-        outlineColor: Cesium.Color.WHITE,
+        outlineColor: Cesium.Color.WHITE, // Bordure d'accroche visuelle
         outlineWidth: 3,
         scaleByDistance: new Cesium.NearFarScalar(1e6, 1.4, 1e8, 0.6),
-        translucencyByDistance: new Cesium.NearFarScalar(1e6, 1.0, 2e8, 0.3),
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY, // Reste net même de loin
       },
       label: {
-        text: labelText,
-        font: isWeather ? 'bold 13px \'Segoe UI\', sans-serif' : 'bold 14px \'Segoe UI\', sans-serif',
-        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-        fillColor: isWeather ? Cesium.Color.fromCssColorString('#00e5ff') : Cesium.Color.WHITE,
-        outlineColor: Cesium.Color.BLACK,
-        outlineWidth: 2,
-        pixelOffset: new Cesium.Cartesian2(0, -32),
+        text: `\u25B6 OUVRIR : ${labelText}`, // Indicateur d'action
+        font: 'bold 14px "Space Grotesk", sans-serif',
+        style: Cesium.LabelStyle.FILL,
+        fillColor: Cesium.Color.WHITE,
+        pixelOffset: new Cesium.Cartesian2(0, -35), // Remonter le label au-dessus du point
         horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
         verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
         showBackground: true,
-        backgroundColor: Cesium.Color.fromCssColorString('rgba(1, 8, 22, 0.75)'),
-        backgroundPadding: new Cesium.Cartesian2(10, 6),
+        backgroundColor: Cesium.Color.fromCssColorString('rgba(2, 12, 28, 0.8)'), // Verre fumé
+        backgroundPadding: new Cesium.Cartesian2(12, 8), // Espace autour du texte
         scaleByDistance: new Cesium.NearFarScalar(1e6, 1.2, 1e8, 0.5),
-        translucencyByDistance: new Cesium.NearFarScalar(1e6, 1.0, 2e8, 0.0),
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
       },
       name: options.name ?? 'Point',
@@ -321,6 +316,19 @@ export class CesiumMapService implements IMapService {
         }
       },
       Cesium.ScreenSpaceEventType.LEFT_CLICK
+    );
+
+    // Curseur 'pointer' au survol des POIs cliquables (affordance bouton)
+    handler.setInputAction(
+      (movement: Cesium.ScreenSpaceEventHandler.MotionEvent) => {
+        const picked = this.viewer!.scene.pick(movement.endPosition);
+        const isPOI =
+          Cesium.defined(picked) &&
+          picked.id &&
+          this.entityProperties.has(picked.id.id);
+        this.viewer!.scene.canvas.style.cursor = isPOI ? 'pointer' : 'default';
+      },
+      Cesium.ScreenSpaceEventType.MOUSE_MOVE
     );
   }
 

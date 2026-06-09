@@ -12,6 +12,7 @@ export class StartMissionUseCase {
         const mainControlPanel = document.getElementById('main-control-panel');
         const hubOverlay = document.getElementById('hub-overlay');
         const poiPanel = document.getElementById('poi-side-panel');
+        const togglePanelBtn = document.getElementById('toggle-panel-btn');
 
         if (!cesiumDiv || !loaderDiv || !threeDiv) return;
 
@@ -21,6 +22,8 @@ export class StartMissionUseCase {
         if (mainControlPanel) mainControlPanel.style.display = 'none';
         if (hubOverlay) hubOverlay.style.display = 'none';
         if (poiPanel) poiPanel.style.display = 'none';
+        // Le bouton de repli ne doit apparaître que sur le globe
+        if (togglePanelBtn) togglePanelBtn.style.display = 'none';
         loaderDiv.style.display = 'flex';
 
         // PAS de setTimeout, PAS de dévoilement de la scène 3D ici.

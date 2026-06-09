@@ -140,7 +140,7 @@ export class InitializeMission {
         const defaultWeatherPOI: POIProperties = {
           title: 'Dashboard Météo',
           description: 'Visualisation des vents et données océanographiques en temps réel. Analyse des courants marins et prévisions météo.',
-          imageUrl: '', // Image supprimée pour éviter l'erreur réseau
+          imageUrl: '/src/assets/Planisphere.jpg', // Illustration du planisphère dans le panneau latéral
           targetId: 'meteo-dashboard',
           isPOI: true
         };

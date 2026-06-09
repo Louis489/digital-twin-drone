@@ -69,7 +69,7 @@ export class GlobeScene {
         cameraAltitude: 8000000, // 8 000 km — vue Atlantique inclinée
         cameraHeading: Cesium.Math.toRadians(5),
         cameraPitch: Cesium.Math.toRadians(-75), // -45° : voir l'horizon
-        flyDuration: 10, // Positionnement immédiat
+        flyDuration: 5, // Positionnement immédiat
         markerOptions: {
           color: '#ff0000',
           pixelSize: 18,
