@@ -247,7 +247,6 @@ Les clés API se renseignent directement dans l'interface (panneau latéral du g
 - **AISStream** : champ *Clé API AISStream* (section Trafic en temps réel).
 - **OpenWeatherMap** : champ *Clé API OpenWeatherMap* (section Weather Layers).
 
-> ⚠️ **Sécurité** : ne committez jamais de clés API en clair dans le code source. Pour un déploiement public, privilégiez des variables d'environnement ou un proxy backend.
 
 ---
 
