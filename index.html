@@ -82,19 +82,83 @@
       }
       #main-control-panel {
         position: absolute;
-        top: 20px;
-        left: 20px;
+        /* Marges proportionnelles : 3% en haut, 2% à gauche */
+        top: 3vh;
+        left: 2vw;
         z-index: 120;
-        width: 330px;
+
+        /* Largeur intelligente : 30% de l'écran (min 280px, max 400px) */
+        width: clamp(280px, 30vw, 400px);
+
+        /* Hauteur maximum proportionnelle (94% de l'écran) */
+        max-height: 94vh;
+        overflow-y: auto;
+
+        /* Design Glassmorphism */
         background: linear-gradient(170deg, rgba(2, 12, 28, 0.84), rgba(1, 6, 18, 0.8));
-        backdrop-filter: blur(5px);
-        -webkit-backdrop-filter: blur(5px);
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
         color: #dffcff;
         border: 1px solid rgba(0, 216, 255, 0.42);
         box-shadow: 0 0 24px rgba(0, 216, 255, 0.14), inset 0 1px 0 rgba(120, 235, 255, 0.08);
         border-radius: 12px;
-        padding: 18px;
+
+        /* Padding interne légèrement fluide */
+        padding: clamp(12px, 2vh, 18px);
         font-family: 'Segoe UI', Arial, sans-serif;
+        transition: transform 0.4s cubic-bezier(0.25, 1, 0.5, 1), opacity 0.4s ease;
+      }
+
+      /* État fermé adapté à la marge fluide (2vw) */
+      #main-control-panel.collapsed {
+        transform: translateX(calc(-100% - 2vw));
+        opacity: 0.5;
+      }
+
+      /* Custom Scrollbar pour le panneau */
+      #main-control-panel::-webkit-scrollbar {
+        width: 6px;
+      }
+      #main-control-panel::-webkit-scrollbar-track {
+        background: rgba(0, 0, 0, 0.2);
+        border-radius: 4px;
+      }
+      #main-control-panel::-webkit-scrollbar-thumb {
+        background: rgba(0, 216, 255, 0.3);
+        border-radius: 4px;
+      }
+      #main-control-panel::-webkit-scrollbar-thumb:hover {
+        background: rgba(0, 216, 255, 0.6);
+      }
+
+      /* Bouton de repli latéral (frère du panneau pour ne pas être clippé par le scroll) */
+      #toggle-panel-btn {
+        position: absolute;
+        top: 3vh;
+        /* Suit le bord droit fluide du panneau : marge gauche (2vw) + largeur clamp */
+        left: calc(2vw + clamp(280px, 30vw, 400px));
+        width: 24px;
+        height: 48px;
+        z-index: 121;
+        background: rgba(2, 12, 28, 0.9);
+        border: 1px solid rgba(0, 216, 255, 0.42);
+        border-left: none;
+        border-radius: 0 8px 8px 0;
+        color: #00d2ff;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: bold;
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        box-shadow: 4px 0 10px rgba(0, 0, 0, 0.3);
+        transition: left 0.4s cubic-bezier(0.25, 1, 0.5, 1), background 0.3s ease;
+      }
+      /* Quand le panneau est replié, le bouton glisse jusqu'au bord gauche de l'écran */
+      #toggle-panel-btn.collapsed {
+        left: 0;
+        background: rgba(0, 216, 255, 0.2);
       }
       #main-control-panel h3 {
         margin: 0;
@@ -236,7 +300,7 @@
         }
       }
     </style>
-    <script type="module" crossorigin src="/digital-twin-drone/assets/index-D-obJcOw.js"></script>
+    <script type="module" crossorigin src="/digital-twin-drone/assets/index-Cdxt5nim.js"></script>
     <link rel="stylesheet" crossorigin href="/digital-twin-drone/assets/index-DqkSn5WT.css">
   </head>
   <body>
@@ -326,6 +390,9 @@
             </div>
         </div>
     </div>
+    <button id="toggle-panel-btn" aria-label="Replier le panneau">
+        <span>◀</span>
+    </button>
     <button id="back-button">Retour au Globe</button>
     
     <div id="app">
